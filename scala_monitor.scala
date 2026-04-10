@@ -4,8 +4,10 @@
 //> using nativeMode release-fast
 //> using nativeLto thin
 //> using option -no-indent
+//> using dep com.lihaoyi::mainargs_native0.5:0.7.8
 
-import java.io.{BufferedInputStream, FileInputStream}
+import java.io.{BufferedInputStream, File, FileInputStream}
+import mainargs.{main, arg, ParserForMethods}
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Paths}
 import scala.scalanative.posix.unistd
@@ -13,11 +15,23 @@ import scala.util.Try
 
 object ScalaManager {
 
-  @main def run(): Unit = {
-    val processes = ScalaManager.discover()
-    if (processes.isEmpty) println("No Scala-related processes found.")
-    else print(ScalaManager.renderTable(processes))
+  @main
+  def run(
+    @arg(short = 'o', doc = "Output format: 'full' (table) or 'pid' (just PIDs)")
+    output: String = "full",
+    @arg(short = 'f', doc = "Filter processes by key=value (repeatable). Keys: type, project. Use * as wildcard for contains matching, case insensitive")
+    filter: Seq[String] = Seq.empty
+  ): Unit = {
+    val processes = discover()
+    val filtered = applyFilters(processes, filter.toList)
+    if (filtered.isEmpty) println("No Scala-related processes found.")
+    else output.toLowerCase match {
+      case "pid"  => filtered.foreach(p => println(p.pid))
+      case _      => print(renderTable(filtered))
+    }
   }
+
+  def main(args: Array[String]): Unit = ParserForMethods(this).runOrExit(args)
 
   private def discover(): List[ScalaProcess] = {
     val totalRamKb = getTotalRamKb()
@@ -57,8 +71,7 @@ object ScalaManager {
     )
 
     sb.append(line).append('\n')
-    sb.append(f"  SCALA PROCESS MONITOR  —  ${processes.size} process${if (processes.size == 1) "" else "es"}")
-    sb.append(f"  —  Total Memory: ${formatMemory(totalResident)}").append('\n')
+    sb.append(f"  SCALA PROCESS MONITOR").append('\n')
     sb.append(line).append('\n')
     sb.append(header).append('\n')
     sb.append(line).append('\n')
@@ -82,8 +95,30 @@ object ScalaManager {
       .map((_, name) => name)
       .getOrElse("Scala/JVM")
 
-  private def isScalaProcess(cmdline: String): Boolean =
-    scalaIndicators.exists(cmdline.toLowerCase.contains)
+  private def isScalaProcess(cmdline: String): Boolean = {
+    val binary = cmdline.indexOf(' ') match {
+      case -1 => cmdline
+      case i  => cmdline.substring(0, i)
+    }
+    val binName = binary.lastIndexOf('/') match {
+      case -1 => binary
+      case i  => binary.substring(i + 1)
+    }
+    binName == "java" && scalaIndicators.exists(cmdline.toLowerCase.contains) ||
+      classifications.exists((pattern, _) => cmdline.contains(pattern))
+  }
+
+  private def applyFilters(processes: List[ScalaProcess], filters: List[String]): List[ScalaProcess] =
+    filters.foldLeft(processes) { case (acc, filter) =>
+      filter.split("=", 2) match {
+        case Array("type", value) =>
+          acc.filter(p => matchesGlob(p.kind, value))
+        case Array("project", value) =>
+          acc.filter(p => matchesGlob(p.projectPath, value))
+        case _ =>
+          println(s"Unknown filter: $filter"); acc
+      }
+    }
 
   private val memTotalPattern = raw"""MemTotal:\s+(\d+)\s+kB""".r
 
@@ -100,18 +135,10 @@ object ScalaManager {
   }.toOption
 
   private def readRawPath(path: String): Option[Array[Byte]] = Try {
+    val chunk = Array.ofDim[Byte](4096)
     val is = new BufferedInputStream(new FileInputStream(path))
-    try {
-      val buf = scala.collection.mutable.ArrayBuffer.newBuilder[Byte]
-      val chunk = Array.ofDim[Byte](4096)
-      var n = is.read(chunk)
-      while (n > 0) {
-        var i = 0
-        while (i < n) { buf += chunk(i); i += 1 }
-        n = is.read(chunk)
-      }
-      buf.result().toArray
-    } finally is.close()
+    try Iterator.continually(is.read(chunk)).takeWhile(_ > 0).flatMap(chunk.take).toArray
+    finally is.close()
   }.toOption
 
   private def readProcFile(pid: Int, name: String): Option[Array[Byte]] =
@@ -119,19 +146,10 @@ object ScalaManager {
 
   private def readCmdline(pid: Int): Option[String] =
     readProcFile(pid, "cmdline").map { bytes =>
-      val parts = scala.collection.mutable.ListBuffer.empty[String]
-      var start = 0
-      var i = 0
-      while (i < bytes.length) {
-        if (bytes(i) == 0) {
-          if (i > start) {
-            parts += new String(bytes, start, i - start, StandardCharsets.UTF_8)
-          }
-          start = i + 1
-        }
-        i += 1
-      }
-      parts.mkString(" ")
+      new String(bytes, 0, bytes.length, StandardCharsets.UTF_8)
+        .split('\u0000')
+        .filter(_.nonEmpty)
+        .mkString(" ")
     }
 
   private def readStatus(pid: Int): Option[Map[String, String]] =
@@ -144,16 +162,8 @@ object ScalaManager {
       }.toMap
     }
 
-  private def listProcEntries(): Array[String] = {
-    val entries = scala.collection.mutable.ArrayBuffer[String]()
-    val stream = Files.newDirectoryStream(Paths.get("/proc"))
-    val iter = stream.iterator()
-    while (iter.hasNext) {
-      entries += iter.next().getFileName.toString
-    }
-    stream.close()
-    entries.toArray
-  }
+  private def listProcEntries(): Array[String] =
+    Option(new File("/proc").listFiles()).map(_.map(_.getName)).getOrElse(Array.empty)
 
   private def formatMemory(kb: Long): String =
     if (kb >= 1024L * 1024L) f"${kb.toDouble / (1024.0 * 1024.0)}%.1f GB"
@@ -163,6 +173,15 @@ object ScalaManager {
   private def shortenPath(path: String): String = {
     val home = System.getProperty("user.home")
     if (path.startsWith(home)) "~" + path.substring(home.length) else path
+  }
+
+  private def matchesGlob(text: String, pattern: String): Boolean = {
+    val t = text.toLowerCase
+    val p = pattern.toLowerCase.trim.stripPrefix("*").stripSuffix("*")
+    if (pattern.startsWith("*") && pattern.endsWith("*")) t.contains(p)
+    else if (pattern.startsWith("*")) t.endsWith(p)
+    else if (pattern.endsWith("*")) t.startsWith(p)
+    else t == p
   }
 
   private def statusLong(status: Map[String, String], key: String): Long =
