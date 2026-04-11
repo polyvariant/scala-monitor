@@ -60,7 +60,7 @@ object MacOsProbe {
     val buf = alloc[Int](maxPids)
     val actual = libproc.proc_listallpids(buf, maxPids * 4)
     if (actual <= 0) Nil
-    else (0 until actual).map(i => !(buf + i)).toList
+    else (0 until actual / 4).map(i => !(buf + i)).toList
   }
 
   private def getProcessInfo(pid: Int): Option[ProcessMemoryInfo] = Zone.acquire { implicit z =>

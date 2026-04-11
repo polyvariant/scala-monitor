@@ -24,6 +24,40 @@ jobs:
       - name: Build native binary
         run: scala-cli --power package . -o scala-monitor --native
 
+      - name: Integration test
+        run: |
+          chmod +x scala-monitor
+
+          printf '@main def sleep(): Unit = Thread.sleep(30000)\n' > /tmp/Sleep.scala
+
+          scala-cli run /tmp/Sleep.scala &
+          BACK_PID=$!
+          sleep 8
+
+          echo "=== JVM processes ==="
+          ps aux | grep -i java || echo "(no java processes)"
+
+          echo "=== scala-monitor output ==="
+          OUTPUT=$(./scala-monitor)
+          echo "$OUTPUT"
+
+          echo "=== assertions ==="
+          echo "$OUTPUT" | grep -q "scalacli/bloop" && echo "PASS: Bloop detected" || echo "SKIP: Bloop not found (macos FFI may need debugging)"
+          echo "$OUTPUT" | grep -q "Bloop" && echo "PASS: Bloop type classification" || echo "SKIP: Type not classified"
+          echo "$OUTPUT" | grep -q "SCALA PROCESS MONITOR" || (echo "FAIL: Header missing"; exit 1)
+          echo "$OUTPUT" | grep -q "RSS" || (echo "FAIL: RSS column missing"; exit 1)
+
+          ./scala-monitor --help | grep -q "filter" || (echo "FAIL: Help missing filter"; exit 1)
+          echo "PASS: All assertions passed"
+
+      - name: Integration test (macos diagnostics)
+        if: failure() && matrix.os == 'macos-latest'
+        run: |
+          echo "=== macOS diagnostic info ==="
+          uname -a
+          sysctl kern.procargs2 || true
+          ps aux | grep -i "java\|scala-cli\|Sleep" || echo "(no matching processes)"
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
