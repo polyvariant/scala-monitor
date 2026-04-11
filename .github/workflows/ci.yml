@@ -2,11 +2,20 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: scala-monitor-linux
+          - os: macos-latest
+            artifact: scala-monitor-macos
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -17,7 +26,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: scala-monitor
+          name: ${{ matrix.artifact }}
           path: scala-monitor
 
   release:
@@ -32,4 +41,6 @@ jobs:
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
-          files: scala-monitor/scala-monitor
+          files: |
+            scala-monitor-linux/scala-monitor
+            scala-monitor-macos/scala-monitor
