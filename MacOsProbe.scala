@@ -15,14 +15,15 @@ object MacOsProbe {
 
   // Byte offsets into proc_taskinfo struct (bsd/sys/proc_info.h):
   //   0  = pti_virtual_size  (uint64), 8 = pti_resident_size (uint64),
-  //   84 = pti_threadnum     (int32) — after 10 × int32 fields
+  //   64 = pti_threadnum     (int32) — after 8 × int32 fields
   private val PtiVirtualSizeOffset = 0
   private val PtiResidentSizeOffset = 8
-  private val PtiThreadNumByteOffset = 84
+  private val PtiThreadNumByteOffset = 64
 
-  // pvp_cdir.vip_path offset in proc_vnodepathinfo struct
-  private val VnodePathCwdOffset = 112
-  private val VnodePathBufSize = 2272
+  // pvp_cdir.vip_path offset = sizeof(struct vinfo_stat) = 152
+  // sizeof(struct proc_vnodepathinfo) = 2 × (152 + MAXPATHLEN) = 2352
+  private val VnodePathCwdOffset = 152
+  private val VnodePathBufSize = 2352
   private val PathMax = 4096
 
   def discoverMac(totalRamKb: Long, selfPid: Int): List[ScalaMonitor.ScalaProcess] = {
