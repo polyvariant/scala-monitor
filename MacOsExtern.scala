@@ -1,3 +1,5 @@
+package org.polyvariant
+
 import scala.scalanative.unsafe._
 
 @extern

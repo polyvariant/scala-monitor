@@ -1,3 +1,5 @@
+package org.polyvariant
+
 import mainargs.{main, arg, ParserForMethods}
 import scala.scalanative.posix.unistd
 import scala.scalanative.meta.LinktimeInfo

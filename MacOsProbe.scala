@@ -1,3 +1,5 @@
+package org.polyvariant
+
 import scala.annotation.tailrec
 import scala.scalanative.unsafe._
 import java.nio.charset.StandardCharsets

@@ -1,3 +1,5 @@
+package org.polyvariant
+
 import java.io.BufferedInputStream
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Paths}

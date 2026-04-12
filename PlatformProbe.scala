@@ -1,3 +1,5 @@
+package org.polyvariant
+
 case class ScalaProcess(
   pid: Int,
   kind: String,
