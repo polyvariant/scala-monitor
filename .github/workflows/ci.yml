@@ -2,11 +2,20 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: scala-monitor-linux
+          - os: macos-latest
+            artifact: scala-monitor-macos
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -15,9 +24,31 @@ jobs:
       - name: Build native binary
         run: scala-cli --power package . -o scala-monitor --native
 
+      - name: Integration test
+        run: |
+          chmod +x scala-monitor
+
+          printf '@main def sleep(): Unit = Thread.sleep(30000)\n' > /tmp/Sleep.scala
+
+          scala-cli run /tmp/Sleep.scala &
+          BACK_PID=$!
+          sleep 8
+
+          echo "=== scala-monitor output ==="
+          OUTPUT=$(./scala-monitor)
+          echo "$OUTPUT"
+
+          echo "=== assertions ==="
+          echo "$OUTPUT" | grep -q "Bloop" || (echo "FAIL: Bloop not detected"; exit 1)
+          echo "$OUTPUT" | grep -q "SCALA PROCESS MONITOR" || (echo "FAIL: Header missing"; exit 1)
+          echo "$OUTPUT" | grep -q "RSS" || (echo "FAIL: RSS column missing"; exit 1)
+
+          ./scala-monitor --help | grep -q "filter" || (echo "FAIL: Help missing filter"; exit 1)
+          echo "PASS: All assertions passed"
+
       - uses: actions/upload-artifact@v4
         with:
-          name: scala-monitor
+          name: ${{ matrix.artifact }}
           path: scala-monitor
 
   release:
@@ -32,4 +63,6 @@ jobs:
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
-          files: scala-monitor/scala-monitor
+          files: |
+            scala-monitor-linux/scala-monitor
+            scala-monitor-macos/scala-monitor
