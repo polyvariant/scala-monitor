@@ -34,7 +34,7 @@ object ScalaMonitor {
     }
   }
 
-  def main(args: Array[String]): Unit = ParserForMethods(this).runOrExit(args)
+  def main(args: Array[String]): Unit = ParserForMethods(this).runOrExit(args.toIndexedSeq)
 
   private def discover(): List[ScalaProcess] = {
     val selfPid = unistd.getpid()

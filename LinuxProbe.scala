@@ -4,7 +4,7 @@ import java.io.BufferedInputStream
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Paths}
 import scala.annotation.tailrec
-import scala.collection.JavaConverters.asScalaIteratorConverter
+import scala.jdk.CollectionConverters.IteratorHasAsScala
 import scala.util.Try
 
 object LinuxProbe extends PlatformProbe {
