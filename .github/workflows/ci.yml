@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -14,7 +15,7 @@ jobs:
           - os: ubuntu-latest
             artifact: scala-monitor-linux
           - os: macos-latest
-            artifact: scala-monitor-macos
+            artifact: scala-monitor-darwin
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -59,10 +60,16 @@ jobs:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          mv artifacts/scala-monitor-linux/scala-monitor release-assets/scala-monitor-linux
+          mv artifacts/scala-monitor-darwin/scala-monitor release-assets/scala-monitor-darwin
 
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            scala-monitor-linux/scala-monitor
-            scala-monitor-macos/scala-monitor
+          files: release-assets/*

@@ -1,8 +1,14 @@
 # scala-monitor
 
-CLI utility that scans `/proc` for running Scala/JVM-related processes (sbt, bloop, metals, scalac, scala-cli, mill, coursier, scalafmt, scalafix, etc.) and displays a formatted table with PID, type, memory usage (RSS/VSZ/SWAP), thread count, mem%, and project path.
+CLI utility that discovers running Scala/JVM-related processes (sbt, bloop, metals, scalac, scala-cli, mill, coursier, scalafmt, scalafix, etc.) and displays a formatted table with PID, type, memory usage (RSS/VSZ/SWAP), thread count, mem%, and project path.
 
-## Build
+## Install
+
+```sh
+curl -sL https://github.com/polyvariant/scala-monitor/releases/latest/download/scala-monitor-$(uname -s | tr '[:upper:]' '[:lower:]') > scala-monitor && chmod +x scala-monitor && ./scala-monitor
+```
+
+## Build from source
 
 ```sh
 scala-cli --power package . -o scala-monitor
@@ -91,4 +97,5 @@ $ ./scala-monitor -f type=metals -o pid
 
 ## Requirements
 
-- [Scala CLI](https://scala-cli.virtuslab.org/) with Scala Native support
+- Linux or macOS
+- For building from source: [Scala CLI](https://scala-cli.virtuslab.org/) with Scala Native support
