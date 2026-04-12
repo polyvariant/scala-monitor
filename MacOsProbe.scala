@@ -4,7 +4,7 @@ import java.nio.charset.StandardCharsets
 
 case class ProcessMemoryInfo(virtualKb: Long, residentKb: Long, threads: Int)
 
-object MacOsProbe {
+object MacOsProbe extends PlatformProbe {
 
   private val PROC_PIDTASKINFO = 4
   private val PROC_PIDVNODEPATHINFO = 9
@@ -26,7 +26,8 @@ object MacOsProbe {
   private val VnodePathBufSize = 2352
   private val PathMax = 4096
 
-  def discoverMac(totalRamKb: Long, selfPid: Int): List[ScalaMonitor.ScalaProcess] = {
+  def discover(selfPid: Int): List[ScalaProcess] = {
+    val totalRamKb = getTotalRamKb()
     val pids = listAllPids()
     pids.filterNot(_ == selfPid).flatMap { pid =>
       for {
@@ -34,7 +35,7 @@ object MacOsProbe {
         if ScalaMonitor.isScalaProcess(cmdline)
         info    <- getProcessInfo(pid)
         cwd     <- getCwd(pid)
-      } yield ScalaMonitor.ScalaProcess(
+      } yield ScalaProcess(
         pid = pid,
         kind = ScalaMonitor.classify(cmdline),
         residentKb = info.residentKb,
