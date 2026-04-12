@@ -22,6 +22,12 @@ Produces a `scala-monitor` native binary.
 ./scala-monitor
 ```
 
+For a `top`-like live view that continuously refreshes the output every 0.1s, run under `watch`:
+
+```sh
+watch -n 0.1 scala-monitor
+```
+
 ## Help
 
 ```
