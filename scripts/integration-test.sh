@@ -84,7 +84,7 @@ assert() {
 
 assert "Bloop detected" "Bloop"
 assert "Header present" "SCALA PROCESS MONITOR"
-assert "RSS column present" "RSS"
+assert "RAM column present" "RAM"
 assert "sbt detected" "[Ss]bt"
 
 # Also check --help

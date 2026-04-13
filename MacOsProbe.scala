@@ -25,22 +25,21 @@ class MacOsProbe(debug: Debug) extends PlatformProbe {
     debug.log(s"ps returned ${lines.size} lines")
 
     val parsed = lines.flatMap { line =>
-      val parts = line.trim.split("\\s+", 5)
-      if (parts.length == 5) {
+      val parts = line.trim.split("\\s+", 4)
+      if (parts.length == 4) {
         try {
-          val pid = parts(0).toInt
-          val memPercent = parts(1).toDouble
-          val virtualKb = parts(2).toLong
-          val residentKb = parts(3).toLong
-          val cmdline = parts(4)
-          Some((pid, memPercent, virtualKb, residentKb, cmdline))
+      val pid = parts(0).toInt
+      val memPercent = parts(1).toDouble
+      val residentKb = parts(2).toLong
+      val cmdline = parts(3)
+      Some((pid, memPercent, residentKb, cmdline))
         } catch {
           case _: NumberFormatException =>
             debug.log(s"  PARSE FAIL: '$line'")
             None
         }
       } else {
-        if (line.trim.nonEmpty) debug.log(s"  PARSE FAIL (got ${parts.length} fields, expected 5): '$line'")
+        if (line.trim.nonEmpty) debug.log(s"  PARSE FAIL (got ${parts.length} fields, expected 4): '$line'")
         None
       }
     }
@@ -48,24 +47,23 @@ class MacOsProbe(debug: Debug) extends PlatformProbe {
     val filteredSelf = parsed.filterNot(_._1 == selfPid)
     debug.log(s"Parsed ${parsed.size} processes, ${filteredSelf.size} after excluding selfPid=$selfPid")
 
-    val matched = filteredSelf.filter { (_, _, _, _, cmdline) =>
+    val matched = filteredSelf.filter { (_, _, _, cmdline) =>
       ScalaMonitor.isScalaProcess(cmdline, debug)
     }
     debug.log(s"PIDs passed isScalaProcess: ${matched.size}")
 
-    val results = matched.map { (pid, memPercent, virtualKb, residentKb, cmdline) =>
+    val results = matched.map { (pid, memPercent, residentKb, cmdline) =>
       val cwd = readProcessWorkingDirectory(pid)
       ScalaProcess(
         pid = pid,
         kind = ScalaMonitor.classify(cmdline, debug),
-        residentKb = residentKb,
-        virtualKb = virtualKb,
+        ramKb = residentKb,
         swapKb = None,
         threads = 0,
         memPercent = memPercent,
         projectPath = cwd.map(ScalaMonitor.shortenPath).getOrElse("unknown")
       )
-    }.sortBy(p => -p.residentKb)
+    }.sortBy(p => -p.ramKb)
 
     debug.log(s"Discovery summary: ${parsed.size} scanned, ${filteredSelf.size} with cmdline, ${matched.size} passed filter, ${results.size} in output")
 
@@ -73,8 +71,8 @@ class MacOsProbe(debug: Debug) extends PlatformProbe {
   }
 
   private def runPsCommand(): List[String] = Zone.acquire { implicit z =>
-    val cmd = c"ps -eo pid=,%mem=,vsz=,rss=,args= -ww"
-    debug.log("Executing: ps -eo pid=,%mem=,vsz=,rss=,args= -ww")
+    val cmd = c"ps -eo pid=,%mem=,rss=,args= -ww"
+    debug.log("Executing: ps -eo pid=,%mem=,rss=,args= -ww")
     val stream = popenlib.popen(cmd, c"r")
     if (stream == null) {
       debug.log("popen('ps ...') FAILED - returned null")

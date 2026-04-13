@@ -40,14 +40,13 @@ class LinuxProbe(debug: Debug) extends PlatformProbe {
         ScalaProcess(
           pid = pid,
           kind = ScalaMonitor.classify(cmdline, debug),
-          residentKb = rss,
-          virtualKb = statusLong(status, "VmSize"),
+          ramKb = rss,
           swapKb = Some(statusLong(status, "VmSwap")),
           threads = statusInt(status, "Threads"),
           memPercent = rss.toDouble / totalRamKb * 100.0,
           projectPath = readCwd(pid).map(ScalaMonitor.shortenPath).getOrElse("-")
         )
-    }.sortBy(p => -p.residentKb)
+    }.sortBy(p => -p.ramKb)
 
     debug.log(s"Discovery summary: ${candidates.size} scanned, ${withCmdline.size} with cmdline, ${matched.size} passed filter, $dropped dropped (status), ${results.size} in output")
 

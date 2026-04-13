@@ -36,9 +36,8 @@ object ScalaMonitor {
     }
   }
 
-  def main(args: Array[String]): Unit = {
-    mainargs.ParserForMethods(this).runOrExit(args)
-  }
+  def main(args: Array[String]): Unit =
+    mainargs.ParserForMethods(this).runOrExit(args.toIndexedSeq)
 
   private def discover(debug: Boolean): List[ScalaProcess] = {
     val dbg = new Debug(debug)
@@ -55,30 +54,29 @@ object ScalaMonitor {
   }
 
   private def renderTable(processes: List[ScalaProcess]): String = {
-    val totalResident = processes.map(_.residentKb).sum
-    val totalVirtual  = processes.map(_.virtualKb).sum
+    val totalRam = processes.map(_.ramKb).sum
     val line = "\u2500" * 130
-    val header = "  %-8s %-12s %10s %12s %10s %6s %5s  %-50s".format(
-      "PID", "TYPE", "RSS", "VSZ", "SWAP", "MEM%", "THR", "PROJECT"
+    val header = "  %-8s %-12s %10s %10s %6s %5s  %-50s".format(
+      "PID", "TYPE", "RAM", "SWAP", "MEM%", "THR", "PROJECT"
     )
     val rows = processes.map { p =>
       val swapStr = p.swapKb.map(formatMemory).getOrElse("n/a")
-      "  %-8d %-12s %10s %12s %10s %5.1f%% %5d  %-50s".format(
-        p.pid, p.kind, formatMemory(p.residentKb), formatMemory(p.virtualKb),
+      "  %-8d %-12s %10s %10s %5.1f%% %5d  %-50s".format(
+        p.pid, p.kind, formatMemory(p.ramKb),
         swapStr, p.memPercent, p.threads, p.projectPath
       )
     }
     val processWord = if (processes.size == 1) "process" else "processes"
     val top = List(
       line,
-      f"  SCALA PROCESS MONITOR  \u2014  ${processes.size} $processWord  \u2014  Total Memory: ${formatMemory(totalResident)}",
+      f"  SCALA PROCESS MONITOR  \u2014  ${processes.size} $processWord  \u2014  Total Memory: ${formatMemory(totalRam)}",
       line,
       header,
       line,
     )
     val bottom = List(
       line,
-      f"  TOTAL: ${processes.size} processes, ${formatMemory(totalResident)} RSS, ${formatMemory(totalVirtual)} VSZ",
+      f"  TOTAL: ${processes.size} processes, ${formatMemory(totalRam)} RAM",
       line,
     )
     (top ++ rows ++ bottom).mkString("\n") + "\n"
