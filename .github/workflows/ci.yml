@@ -25,27 +25,11 @@ jobs:
       - name: Build native binary
         run: scala-cli --power package . -o scala-monitor --native
 
+      - name: Install sbt
+        run: cs install sbt --install-dir /usr/local/bin
+
       - name: Integration test
-        run: |
-          chmod +x scala-monitor
-
-          printf '@main def sleep(): Unit = Thread.sleep(30000)\n' > /tmp/Sleep.scala
-
-          scala-cli run /tmp/Sleep.scala &
-          BACK_PID=$!
-          sleep 8
-
-          echo "=== scala-monitor output ==="
-          OUTPUT=$(./scala-monitor)
-          echo "$OUTPUT"
-
-          echo "=== assertions ==="
-          echo "$OUTPUT" | grep -q "Bloop" || (echo "FAIL: Bloop not detected"; exit 1)
-          echo "$OUTPUT" | grep -q "SCALA PROCESS MONITOR" || (echo "FAIL: Header missing"; exit 1)
-          echo "$OUTPUT" | grep -q "RSS" || (echo "FAIL: RSS column missing"; exit 1)
-
-          ./scala-monitor --help | grep -q "filter" || (echo "FAIL: Help missing filter"; exit 1)
-          echo "PASS: All assertions passed"
+        run: scripts/integration-test.sh
 
       - uses: actions/upload-artifact@v4
         with:

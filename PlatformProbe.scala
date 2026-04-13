@@ -3,8 +3,7 @@ package org.polyvariant
 case class ScalaProcess(
   pid: Int,
   kind: String,
-  residentKb: Long,
-  virtualKb: Long,
+  ramKb: Long,
   swapKb: Option[Long],
   threads: Int,
   memPercent: Double,

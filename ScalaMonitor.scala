@@ -1,6 +1,6 @@
 package org.polyvariant
 
-import mainargs.{main, arg, ParserForMethods}
+import mainargs.{main, arg, Flag}
 import scala.scalanative.posix.unistd
 import scala.scalanative.meta.LinktimeInfo
 
@@ -22,9 +22,11 @@ object ScalaMonitor {
     @arg(short = 'o', doc = "Output format: 'full' (table) or 'pid' (just PIDs)")
     output: String = "full",
     @arg(short = 'f', doc = "Filter processes by key=value (repeatable). Keys: type, project. Use * as wildcard for contains matching, case insensitive")
-    filter: Seq[String] = Seq.empty
+    filter: Seq[String] = Seq.empty,
+    @arg(short = 'd', doc = "Enable verbose debug logging to stderr")
+    debug: Flag = Flag()
   ): Unit = {
-    val processes = discover()
+    val processes = discover(debug.value)
     val (filtered, warnings) = applyFilters(processes, filter.toList)
     warnings.foreach(w => System.err.println(s"Warning: $w"))
     if (filtered.isEmpty) println("No Scala-related processes found.")
@@ -34,54 +36,64 @@ object ScalaMonitor {
     }
   }
 
-  def main(args: Array[String]): Unit = ParserForMethods(this).runOrExit(args.toIndexedSeq)
+  def main(args: Array[String]): Unit =
+    mainargs.ParserForMethods(this).runOrExit(args.toIndexedSeq)
 
-  private def discover(): List[ScalaProcess] = {
+  private def discover(debug: Boolean): List[ScalaProcess] = {
+    val dbg = new Debug(debug)
     val selfPid = unistd.getpid()
+    dbg.log(s"Discovering processes (selfPid=$selfPid)")
     val probe: PlatformProbe =
-      if (LinktimeInfo.isMac) MacOsProbe
-      else if (LinktimeInfo.isLinux) LinuxProbe
-      else return Nil
+      if (LinktimeInfo.isMac) new MacOsProbe(dbg)
+      else if (LinktimeInfo.isLinux) new LinuxProbe(dbg)
+      else {
+        dbg.log("Unknown platform — neither macOS nor Linux, returning empty")
+        return Nil
+      }
     probe.discover(selfPid)
   }
 
   private def renderTable(processes: List[ScalaProcess]): String = {
-    val totalResident = processes.map(_.residentKb).sum
-    val totalVirtual  = processes.map(_.virtualKb).sum
+    val totalRam = processes.map(_.ramKb).sum
     val line = "\u2500" * 130
-    val header = "  %-8s %-12s %10s %12s %10s %6s %5s  %-50s".format(
-      "PID", "TYPE", "RSS", "VSZ", "SWAP", "MEM%", "THR", "PROJECT"
+    val header = "  %-8s %-12s %10s %10s %6s %5s  %-50s".format(
+      "PID", "TYPE", "RAM", "SWAP", "MEM%", "THR", "PROJECT"
     )
     val rows = processes.map { p =>
       val swapStr = p.swapKb.map(formatMemory).getOrElse("n/a")
-      "  %-8d %-12s %10s %12s %10s %5.1f%% %5d  %-50s".format(
-        p.pid, p.kind, formatMemory(p.residentKb), formatMemory(p.virtualKb),
+      "  %-8d %-12s %10s %10s %5.1f%% %5d  %-50s".format(
+        p.pid, p.kind, formatMemory(p.ramKb),
         swapStr, p.memPercent, p.threads, p.projectPath
       )
     }
     val processWord = if (processes.size == 1) "process" else "processes"
     val top = List(
       line,
-      f"  SCALA PROCESS MONITOR  \u2014  ${processes.size} $processWord  \u2014  Total Memory: ${formatMemory(totalResident)}",
+      f"  SCALA PROCESS MONITOR  \u2014  ${processes.size} $processWord  \u2014  Total Memory: ${formatMemory(totalRam)}",
       line,
       header,
       line,
     )
     val bottom = List(
       line,
-      f"  TOTAL: ${processes.size} processes, ${formatMemory(totalResident)} RSS, ${formatMemory(totalVirtual)} VSZ",
+      f"  TOTAL: ${processes.size} processes, ${formatMemory(totalRam)} RAM",
       line,
     )
     (top ++ rows ++ bottom).mkString("\n") + "\n"
   }
 
-  def classify(cmdline: String): String =
-    classifications
+  def classify(cmdline: String, debug: Debug): String = {
+    val result = classifications
       .find(c => cmdline.contains(c.pattern))
       .map(_.name)
       .getOrElse("Scala/JVM")
+    debug.log(s"  classify('$cmdline') → '$result'")
+    result
+  }
 
-  def isScalaProcess(cmdline: String): Boolean = {
+  def isScalaProcess(cmdline: String, debug: Debug): Boolean = {
+    if (cmdline.isEmpty) return false
+
     val binary = cmdline.indexOf(' ') match {
       case -1 => cmdline
       case i  => cmdline.substring(0, i)
@@ -90,8 +102,29 @@ object ScalaMonitor {
       case -1 => binary
       case i  => binary.substring(i + 1)
     }
-    binName == "java" && scalaIndicators.exists(cmdline.toLowerCase.contains) ||
-      classifications.exists(c => cmdline.contains(c.pattern))
+
+    val branch1Java = binName == "java"
+    val branch1Match = if (branch1Java) {
+      scalaIndicators.find(ind => cmdline.toLowerCase.contains(ind))
+    } else None
+
+    val branch2Match = classifications.find(c => cmdline.contains(c.pattern))
+
+    val accepted = branch1Match.isDefined || branch2Match.isDefined
+
+    if (accepted) {
+      debug.log(
+        s"  ACCEPT: cmdline='$cmdline' | binName='$binName' | " +
+        s"branch1(${branch1Match.map(m => s"'$m'").getOrElse("n/a")}) | " +
+        s"branch2(${branch2Match.map(c => s"'${c.pattern}'→'${c.name}'").getOrElse("n/a")})"
+      )
+    } else if (branch1Java) {
+      debug.log(
+        s"  REJECT (java, no indicator): cmdline='${cmdline.take(120)}'"
+      )
+    }
+
+    accepted
   }
 
   def shortenPath(path: String): String =
