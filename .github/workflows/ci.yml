@@ -29,39 +29,7 @@ jobs:
         run: cs install sbt --install-dir /usr/local/bin
 
       - name: Integration test
-        run: |
-          chmod +x scala-monitor
-
-          # Launch a Scala/JVM process via scala-cli
-          printf '@main def sleep(): Unit = Thread.sleep(30000)\n' > /tmp/Sleep.scala
-          scala-cli run /tmp/Sleep.scala &
-          SCALA_CLI_PID=$!
-
-          # Create a minimal sbt project and launch sbt
-          mkdir -p /tmp/sleep-sbt/project
-          printf 'name := "sleep"\nset Global / onLoad := { val _ = Thread.sleep(30000); (Global / onLoad).value }\n' > /tmp/sleep-sbt/build.sbt
-          (cd /tmp/sleep-sbt && sbt -Dsbt.log.noformat=true </dev/null > /dev/null 2>&1) &
-          SBT_PID=$!
-
-          sleep 30
-
-          # Verify sbt is running
-          ps aux | grep -i 'xsbt.boot.Boot\|sbt-launch' | grep -v grep || echo "WARN: sbt process not found in ps"
-
-          echo "=== scala-monitor output ==="
-          OUTPUT=$(./scala-monitor)
-          echo "$OUTPUT"
-
-          echo "=== assertions ==="
-          echo "$OUTPUT" | grep -q "Bloop" || (echo "FAIL: Bloop not detected"; exit 1)
-          echo "$OUTPUT" | grep -q "SCALA PROCESS MONITOR" || (echo "FAIL: Header missing"; exit 1)
-          echo "$OUTPUT" | grep -q "RSS" || (echo "FAIL: RSS column missing"; exit 1)
-          echo "$OUTPUT" | grep -qi "sbt" || (echo "FAIL: sbt not detected"; exit 1)
-
-          ./scala-monitor --help | grep -q "filter" || (echo "FAIL: Help missing filter"; exit 1)
-          echo "PASS: All assertions passed"
-
-          kill $SCALA_CLI_PID $SBT_PID 2>/dev/null || true
+        run: scripts/integration-test.sh
 
       - uses: actions/upload-artifact@v4
         with:
