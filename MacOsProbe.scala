@@ -2,11 +2,12 @@ package org.polyvariant
 
 import scala.annotation.tailrec
 import scala.scalanative.unsafe._
+import scala.scalanative.meta.LinktimeInfo
 import java.nio.charset.StandardCharsets
 
 case class ProcessMemoryInfo(virtualKb: Long, residentKb: Long, threads: Int)
 
-object MacOsProbe extends PlatformProbe {
+class MacOsProbe(debug: Debug) extends PlatformProbe {
 
   // proc_pidinfo() "flavor" codes — select which kernel struct to return
   private val ProcPidTaskInfo = 4      // struct proc_taskinfo: memory stats + thread count
@@ -34,18 +35,28 @@ object MacOsProbe extends PlatformProbe {
 
   private val MaxPathLength = 4096
 
+  debug.log(s"Platform: macOS (isMac=${LinktimeInfo.isMac}, isLinux=${LinktimeInfo.isLinux}, is32Bit=${LinktimeInfo.is32BitPlatform})")
+
   def discover(selfPid: Int): List[ScalaProcess] = {
     val totalRamKb = queryTotalPhysicalMemoryKb()
     val pids = listAllRunningPids()
-    pids.filterNot(_ == selfPid).flatMap { pid =>
+    val candidates = pids.filterNot(_ == selfPid)
+
+    debug.log(s"Self PID: $selfPid, Total PIDs found: ${candidates.size}")
+
+    val withCmdline = candidates.flatMap(pid => readProcessCmdline(pid).map((pid, _)))
+    debug.log(s"PIDs with cmdline: ${withCmdline.size}")
+
+    val matched = withCmdline.filter((_, cmdline) => ScalaMonitor.isScalaProcess(cmdline, debug))
+    debug.log(s"PIDs passed isScalaProcess: ${matched.size}")
+
+    val results = matched.flatMap { (pid, cmdline) =>
       for {
-        cmdline <- readProcessCmdline(pid)
-        if ScalaMonitor.isScalaProcess(cmdline)
-        info    <- readProcessMemoryAndThreads(pid)
-        cwd     <- readProcessWorkingDirectory(pid)
+        info <- readProcessMemoryAndThreads(pid)
+        cwd  <- readProcessWorkingDirectory(pid)
       } yield ScalaProcess(
         pid = pid,
-        kind = ScalaMonitor.classify(cmdline),
+        kind = ScalaMonitor.classify(cmdline, debug),
         residentKb = info.residentKb,
         virtualKb = info.virtualKb,
         swapKb = None,
@@ -54,34 +65,60 @@ object MacOsProbe extends PlatformProbe {
         projectPath = ScalaMonitor.shortenPath(cwd)
       )
     }.sortBy(p => -p.residentKb)
+
+    debug.log(s"Discovery summary: ${candidates.size} scanned, ${withCmdline.size} with cmdline, ${matched.size} passed filter, ${results.size} in output")
+
+    results
   }
 
   private def queryTotalPhysicalMemoryKb(): Long = Zone.acquire { implicit z =>
     val resultPtr = alloc[Long](1)
     val resultSizePtr = alloc[Long](1)
     !resultSizePtr = 8L
-    if (macsysctl.sysctlbyname(c"hw.memsize", resultPtr.asInstanceOf[Ptr[Byte]], resultSizePtr, null, 0L) == 0)
-      (!resultPtr) / 1024
-    else 1L
+    val ret = macsysctl.sysctlbyname(c"hw.memsize", resultPtr.asInstanceOf[Ptr[Byte]], resultSizePtr, null, 0L)
+    if (ret == 0) {
+      val kb = (!resultPtr) / 1024
+      debug.log(s"Total physical memory: ${kb} KB (sysctl hw.memsize returned $ret)")
+      kb
+    } else {
+      debug.log(s"sysctl(hw.memsize) FAILED with return code $ret — using fallback of 1 KB")
+      1L
+    }
   }
 
   private def listAllRunningPids(): List[Int] = Zone.acquire { implicit z =>
     val MaxPidCount = 4096
+    val bufferSize = MaxPidCount * 4
     val pidBuffer = alloc[Int](MaxPidCount)
     // Returns bytes written, not count — divide by sizeof(int) to get pid count
-    val bytesWritten = libproc.proc_listallpids(pidBuffer, MaxPidCount * 4)
-    if (bytesWritten <= 0) Nil
-    else (0 until bytesWritten / 4).map(i => !(pidBuffer + i)).toList
+    val bytesWritten = libproc.proc_listallpids(pidBuffer, bufferSize)
+
+    debug.log(s"proc_listallpids: bytesWritten=$bytesWritten, bufferSize=$bufferSize")
+
+    if (bytesWritten <= 0) {
+      debug.log(s"proc_listallpids FAILED or returned empty (bytesWritten=$bytesWritten)")
+      Nil
+    } else {
+      if (bytesWritten == bufferSize) {
+        debug.log(s"WARNING: bytesWritten == bufferSize ($bufferSize) — PID buffer may be truncated, some PIDs lost")
+      }
+      val pids = (0 until bytesWritten / 4).map(i => !(pidBuffer + i)).toList
+      debug.log(s"PID count: ${pids.size}")
+      pids
+    }
   }
 
   private def readProcessMemoryAndThreads(pid: Int): Option[ProcessMemoryInfo] = Zone.acquire { implicit z =>
     val buffer = alloc[Byte](TaskInfoStructSize)
     val bytesWritten = libproc.proc_pidinfo(pid, ProcPidTaskInfo, 0L, buffer, TaskInfoStructSize)
-    if (bytesWritten <= 0) None
-    else {
+    if (bytesWritten <= 0) {
+      debug.log(s"PID $pid: proc_pidinfo(ProcPidTaskInfo) FAILED (bytesWritten=$bytesWritten)")
+      None
+    } else {
       val virtualKb = readLongAt(buffer, TaskInfoVirtualSizeOffset) / 1024
       val residentKb = readLongAt(buffer, TaskInfoResidentSizeOffset) / 1024
       val threads = readIntAt(buffer, TaskInfoThreadCountOffset)
+      debug.log(s"PID $pid: memory OK — virtual=${virtualKb}KB, resident=${residentKb}KB, threads=$threads")
       Some(ProcessMemoryInfo(virtualKb, residentKb, threads))
     }
   }
@@ -89,11 +126,6 @@ object MacOsProbe extends PlatformProbe {
   private def readProcessCmdline(pid: Int): Option[String] =
     readCmdlineViaSysctl(pid).orElse(readExecutablePathAsFallback(pid))
 
-  // macOS exposes per-process command-line arguments via sysctl kern.procargs2.<pid>.
-  // The returned buffer layout:
-  //   [0..3]   int32 argc
-  //   [4..]    exec path (NUL-terminated), padding NULs, then argc NUL-separated arg strings
-  // Buffer size must be allocated to kern.argmax (system-wide max).
   private def readCmdlineViaSysctl(pid: Int): Option[String] = Zone.acquire { implicit z =>
     queryMaxArgsBufferSize() match {
       case None => None
@@ -103,15 +135,20 @@ object MacOsProbe extends PlatformProbe {
         !argsBufferSizePtr = maxArgsSize.toLong
 
         val procArgsMib = buildSysctlMib(SysctlKern, SysctlKernProcArgs2, pid)
-        if (macsysctl.sysctl(procArgsMib, 3, argsBuffer, argsBufferSizePtr, null, 0L) != 0) {
+        val sysctlRet = macsysctl.sysctl(procArgsMib, 3, argsBuffer, argsBufferSizePtr, null, 0L)
+        if (sysctlRet != 0) {
+          debug.log(s"PID $pid: sysctl(KERN_PROCARGS2) FAILED (return=$sysctlRet)")
           None
         } else {
           val bytesWritten = (!argsBufferSizePtr).toInt
-          if (bytesWritten < 4) None
-          else {
+          if (bytesWritten < 4) {
+            debug.log(s"PID $pid: sysctl(KERN_PROCARGS2) returned bytesWritten=$bytesWritten (< 4), insufficient for argc header")
+            None
+          } else {
             val argumentCount = readIntAt(argsBuffer, 0)
             val rawBytes = (0 until bytesWritten).map(i => !(argsBuffer + i)).toArray
             val arguments = extractArgumentsFromProcBuffer(argumentCount, rawBytes)
+            debug.log(s"PID $pid: sysctl(KERN_PROCARGS2) OK — bytesWritten=$bytesWritten, argc=$argumentCount, args=[${arguments.mkString(", ")}]")
             if (arguments.nonEmpty) Some(arguments.mkString(" "))
             else None
           }
@@ -124,8 +161,15 @@ object MacOsProbe extends PlatformProbe {
     val resultSizePtr = alloc[Long](1)
     !resultSizePtr = 4L
     val mib = buildSysctlMib(SysctlKern, SysctlKernArgmax)
-    if (macsysctl.sysctl(mib, 2, resultPtr.asInstanceOf[Ptr[Byte]], resultSizePtr, null, 0L) != 0) None
-    else Some(!resultPtr)
+    val ret = macsysctl.sysctl(mib, 2, resultPtr.asInstanceOf[Ptr[Byte]], resultSizePtr, null, 0L)
+    if (ret != 0) {
+      debug.log(s"sysctl(KERN_ARGMAX) FAILED (return=$ret) — sysctl cmdline path disabled, falling back to proc_pidpath only")
+      None
+    } else {
+      val maxArgs = !resultPtr
+      debug.log(s"kern.argmax = $maxArgs bytes")
+      Some(maxArgs)
+    }
   }
 
   private def buildSysctlMib(components: Int*)(implicit z: Zone): Ptr[Int] = {
@@ -164,22 +208,29 @@ object MacOsProbe extends PlatformProbe {
     readNulSeparatedStrings(argsStart, argumentCount, Nil)
   }
 
-  // Fallback: when sysctl args unavailable, use just the executable path
   private def readExecutablePathAsFallback(pid: Int): Option[String] = Zone.acquire { implicit z =>
     val pathBuffer = alloc[Byte](MaxPathLength)
     val pathLength = libproc.proc_pidpath(pid, pathBuffer, MaxPathLength)
-    if (pathLength > 0) Some(fromCString(pathBuffer.asInstanceOf[CString], StandardCharsets.UTF_8))
-    else None
+    if (pathLength <= 0) {
+      debug.log(s"PID $pid: proc_pidpath FAILED (return=$pathLength) — no cmdline available")
+      None
+    } else {
+      val path = fromCString(pathBuffer.asInstanceOf[CString], StandardCharsets.UTF_8)
+      debug.log(s"PID $pid: proc_pidpath fallback → $path")
+      Some(path)
+    }
   }
 
   private def readProcessWorkingDirectory(pid: Int): Option[String] = Zone.acquire { implicit z =>
     val buffer = alloc[Byte](VnodeInfoStructSize)
     val bytesWritten = libproc.proc_pidinfo(pid, ProcPidVnodePathInfo, 0L, buffer, VnodeInfoStructSize)
     if (bytesWritten <= 0) {
+      debug.log(s"PID $pid: proc_pidinfo(ProcPidVnodePathInfo) FAILED (bytesWritten=$bytesWritten)")
       None
     } else {
       val cwdPtr = (buffer + VnodeInfoCwdPathOffset).asInstanceOf[CString]
       val cwd = fromCString(cwdPtr, StandardCharsets.UTF_8)
+      debug.log(s"PID $pid: cwd → $cwd")
       if (cwd.nonEmpty) Some(cwd) else None
     }
   }

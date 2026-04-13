@@ -22,9 +22,11 @@ object ScalaMonitor {
     @arg(short = 'o', doc = "Output format: 'full' (table) or 'pid' (just PIDs)")
     output: String = "full",
     @arg(short = 'f', doc = "Filter processes by key=value (repeatable). Keys: type, project. Use * as wildcard for contains matching, case insensitive")
-    filter: Seq[String] = Seq.empty
+    filter: Seq[String] = Seq.empty,
+    @arg(short = 'd', doc = "Enable verbose debug logging to stderr")
+    debug: Boolean = false
   ): Unit = {
-    val processes = discover()
+    val processes = discover(debug)
     val (filtered, warnings) = applyFilters(processes, filter.toList)
     warnings.foreach(w => System.err.println(s"Warning: $w"))
     if (filtered.isEmpty) println("No Scala-related processes found.")
@@ -36,12 +38,17 @@ object ScalaMonitor {
 
   def main(args: Array[String]): Unit = ParserForMethods(this).runOrExit(args.toIndexedSeq)
 
-  private def discover(): List[ScalaProcess] = {
+  private def discover(debug: Boolean): List[ScalaProcess] = {
+    val dbg = new Debug(debug)
     val selfPid = unistd.getpid()
+    dbg.log(s"Discovering processes (selfPid=$selfPid)")
     val probe: PlatformProbe =
-      if (LinktimeInfo.isMac) MacOsProbe
-      else if (LinktimeInfo.isLinux) LinuxProbe
-      else return Nil
+      if (LinktimeInfo.isMac) new MacOsProbe(dbg)
+      else if (LinktimeInfo.isLinux) new LinuxProbe(dbg)
+      else {
+        dbg.log("Unknown platform — neither macOS nor Linux, returning empty")
+        return Nil
+      }
     probe.discover(selfPid)
   }
 
@@ -75,13 +82,18 @@ object ScalaMonitor {
     (top ++ rows ++ bottom).mkString("\n") + "\n"
   }
 
-  def classify(cmdline: String): String =
-    classifications
+  def classify(cmdline: String, debug: Debug): String = {
+    val result = classifications
       .find(c => cmdline.contains(c.pattern))
       .map(_.name)
       .getOrElse("Scala/JVM")
+    debug.log(s"  classify('$cmdline') → '$result'")
+    result
+  }
 
-  def isScalaProcess(cmdline: String): Boolean = {
+  def isScalaProcess(cmdline: String, debug: Debug): Boolean = {
+    if (cmdline.isEmpty) return false
+
     val binary = cmdline.indexOf(' ') match {
       case -1 => cmdline
       case i  => cmdline.substring(0, i)
@@ -90,8 +102,29 @@ object ScalaMonitor {
       case -1 => binary
       case i  => binary.substring(i + 1)
     }
-    binName == "java" && scalaIndicators.exists(cmdline.toLowerCase.contains) ||
-      classifications.exists(c => cmdline.contains(c.pattern))
+
+    val branch1Java = binName == "java"
+    val branch1Match = if (branch1Java) {
+      scalaIndicators.find(ind => cmdline.toLowerCase.contains(ind))
+    } else None
+
+    val branch2Match = classifications.find(c => cmdline.contains(c.pattern))
+
+    val accepted = branch1Match.isDefined || branch2Match.isDefined
+
+    if (accepted) {
+      debug.log(
+        s"  ACCEPT: cmdline='$cmdline' | binName='$binName' | " +
+        s"branch1(${branch1Match.map(m => s"'$m'").getOrElse("n/a")}) | " +
+        s"branch2(${branch2Match.map(c => s"'${c.pattern}'→'${c.name}'").getOrElse("n/a")})"
+      )
+    } else if (branch1Java) {
+      debug.log(
+        s"  REJECT (java, no indicator): cmdline='${cmdline.take(120)}'"
+      )
+    }
+
+    accepted
   }
 
   def shortenPath(path: String): String =

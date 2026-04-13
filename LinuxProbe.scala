@@ -5,39 +5,53 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Paths}
 import scala.annotation.tailrec
 import scala.jdk.CollectionConverters.IteratorHasAsScala
+import scala.scalanative.meta.LinktimeInfo
 import scala.util.Try
 
-object LinuxProbe extends PlatformProbe {
+class LinuxProbe(debug: Debug) extends PlatformProbe {
 
   private val memTotalPattern = raw"""MemTotal:\s+(\d+)\s+kB""".r
 
+  debug.log(s"Platform: Linux (isMac=${LinktimeInfo.isMac}, isLinux=${LinktimeInfo.isLinux}, is32Bit=${LinktimeInfo.is32BitPlatform})")
+
   def discover(selfPid: Int): List[ScalaProcess] = {
     val totalRamKb = getTotalRamKb()
-    listProcEntries().iterator
-      .filter(_.forall(_.isDigit))
-      .map(_.toInt)
-      .filterNot(_ == selfPid)
-      .flatMap { pid =>
-        for {
-          cmdline <- readCmdline(pid)
-          if ScalaMonitor.isScalaProcess(cmdline)
-          status  <- readStatus(pid)
-        } yield {
-          val rss = statusLong(status, "VmRSS")
-          ScalaProcess(
-            pid = pid,
-            kind = ScalaMonitor.classify(cmdline),
-            residentKb = rss,
-            virtualKb = statusLong(status, "VmSize"),
-            swapKb = Some(statusLong(status, "VmSwap")),
-            threads = statusInt(status, "Threads"),
-            memPercent = rss.toDouble / totalRamKb * 100.0,
-            projectPath = readCwd(pid).map(ScalaMonitor.shortenPath).getOrElse("-")
-          )
-        }
-      }
-      .toList
-      .sortBy(p => -p.residentKb)
+    val procEntries = listProcEntries()
+    val candidates = procEntries.iterator.filter(_.forall(_.isDigit)).map(_.toInt).filterNot(_ == selfPid).toList
+
+    debug.log(s"Self PID: $selfPid, /proc entries: ${procEntries.size}")
+
+    val withCmdline = candidates.flatMap(pid => readCmdline(pid).map((pid, _)))
+    debug.log(s"PIDs with cmdline: ${withCmdline.size}")
+
+    val matched = withCmdline.filter((_, cmdline) => ScalaMonitor.isScalaProcess(cmdline, debug))
+    debug.log(s"PIDs passed isScalaProcess: ${matched.size}")
+
+    val withStatus = matched.map { (pid, cmdline) =>
+      (pid, cmdline, readStatus(pid))
+    }
+
+    val dropped = withStatus.count((_, _, status) => status.isEmpty)
+    if dropped > 0 then debug.log(s"PIDs dropped due to missing status: $dropped")
+
+    val results = withStatus.collect {
+      case (pid, cmdline, Some(status)) =>
+        val rss = statusLong(status, "VmRSS")
+        ScalaProcess(
+          pid = pid,
+          kind = ScalaMonitor.classify(cmdline, debug),
+          residentKb = rss,
+          virtualKb = statusLong(status, "VmSize"),
+          swapKb = Some(statusLong(status, "VmSwap")),
+          threads = statusInt(status, "Threads"),
+          memPercent = rss.toDouble / totalRamKb * 100.0,
+          projectPath = readCwd(pid).map(ScalaMonitor.shortenPath).getOrElse("-")
+        )
+    }.sortBy(p => -p.residentKb)
+
+    debug.log(s"Discovery summary: ${candidates.size} scanned, ${withCmdline.size} with cmdline, ${matched.size} passed filter, $dropped dropped (status), ${results.size} in output")
+
+    results
   }
 
   private def getTotalRamKb(): Long =
@@ -46,7 +60,13 @@ object LinuxProbe extends PlatformProbe {
         val content = new String(bytes, StandardCharsets.UTF_8)
         memTotalPattern.findFirstMatchIn(content).map(_.group(1).toLong)
       }
-      .getOrElse(1L)
+      .fold {
+        debug.log("Failed to read /proc/meminfo or parse MemTotal — using fallback of 1 KB")
+        1L
+      } { kb =>
+        debug.log(s"Total physical memory: $kb KB")
+        kb
+      }
 
   private def readRawPath(path: String): Option[Array[Byte]] = Try {
     val is = new BufferedInputStream(new java.io.FileInputStream(path))
@@ -59,7 +79,10 @@ object LinuxProbe extends PlatformProbe {
   }.toOption
 
   private def readProcFile(pid: Int, name: String): Option[Array[Byte]] =
-    readRawPath(s"/proc/$pid/$name")
+    readProcFile(s"/proc/$pid/$name")
+
+  private def readProcFile(path: String): Option[Array[Byte]] =
+    readRawPath(path)
 
   private def readCmdline(pid: Int): Option[String] =
     readProcFile(pid, "cmdline").map(splitNul)
