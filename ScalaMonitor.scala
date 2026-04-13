@@ -1,6 +1,6 @@
 package org.polyvariant
 
-import mainargs.{main, arg, ParserForMethods}
+import mainargs.{main, arg, Flag}
 import scala.scalanative.posix.unistd
 import scala.scalanative.meta.LinktimeInfo
 
@@ -24,9 +24,9 @@ object ScalaMonitor {
     @arg(short = 'f', doc = "Filter processes by key=value (repeatable). Keys: type, project. Use * as wildcard for contains matching, case insensitive")
     filter: Seq[String] = Seq.empty,
     @arg(short = 'd', doc = "Enable verbose debug logging to stderr")
-    debug: Boolean = false
+    debug: Flag = Flag()
   ): Unit = {
-    val processes = discover(debug)
+    val processes = discover(debug.value)
     val (filtered, warnings) = applyFilters(processes, filter.toList)
     warnings.foreach(w => System.err.println(s"Warning: $w"))
     if (filtered.isEmpty) println("No Scala-related processes found.")
@@ -36,7 +36,9 @@ object ScalaMonitor {
     }
   }
 
-  def main(args: Array[String]): Unit = ParserForMethods(this).runOrExit(args.toIndexedSeq)
+  def main(args: Array[String]): Unit = {
+    mainargs.ParserForMethods(this).runOrExit(args)
+  }
 
   private def discover(debug: Boolean): List[ScalaProcess] = {
     val dbg = new Debug(debug)
