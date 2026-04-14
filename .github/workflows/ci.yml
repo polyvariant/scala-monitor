@@ -14,8 +14,6 @@ jobs:
         include:
           - os: ubuntu-latest
             artifact: scala-monitor-linux
-          - os: macos-13
-            artifact: scala-monitor-x86_64-apple-darwin
           - os: macos-14
             artifact: scala-monitor-aarch64-apple-darwin
     runs-on: ${{ matrix.os }}
@@ -102,7 +100,6 @@ jobs:
         run: |
           mkdir -p release-assets
           mv artifacts/scala-monitor-linux/scala-monitor release-assets/scala-monitor-linux
-          mv artifacts/scala-monitor-x86_64-apple-darwin/scala-monitor release-assets/scala-monitor-x86_64-apple-darwin
           mv artifacts/scala-monitor-aarch64-apple-darwin/scala-monitor release-assets/scala-monitor-aarch64-apple-darwin
           cp release-assets/scala-monitor-aarch64-apple-darwin release-assets/scala-monitor-darwin
 

@@ -8,7 +8,6 @@
   "launcherType": "scala-native",
   "prebuiltBinaries": {
     "x86_64-pc-linux": "https://github.com/polyvariant/scala-monitor/releases/download/v${version}/scala-monitor-linux",
-    "x86_64-apple-darwin": "https://github.com/polyvariant/scala-monitor/releases/download/v${version}/scala-monitor-x86_64-apple-darwin",
     "aarch64-apple-darwin": "https://github.com/polyvariant/scala-monitor/releases/download/v${version}/scala-monitor-aarch64-apple-darwin"
   }
 }
