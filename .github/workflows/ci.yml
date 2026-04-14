@@ -25,6 +25,9 @@ jobs:
       - name: Build native binary
         run: scala-cli --power package . -o scala-monitor --native
 
+      - name: Unit tests
+        run: scala-cli test .
+
       - name: Install sbt
         run: cs install sbt --install-dir /usr/local/bin
 
