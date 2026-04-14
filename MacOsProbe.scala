@@ -16,8 +16,6 @@ class MacOsProbe(debug: Debug) extends PlatformProbe {
   private val VnodeInfoCwdPathOffset = 152
   private val VnodeInfoStructSize = 2352 // 2 x (152 + MAXPATHLEN)
 
-  private val MaxPathLength = 4096
-
   debug.log(s"Platform: macOS (isMac=${LinktimeInfo.isMac}, isLinux=${LinktimeInfo.isLinux}, is32Bit=${LinktimeInfo.is32BitPlatform})")
 
   def discover(selfPid: Int): List[ScalaProcess] = {
@@ -26,7 +24,7 @@ class MacOsProbe(debug: Debug) extends PlatformProbe {
     MacOsProbe.parsePsLines(lines, selfPid, debug, cwdResolver = readProcessWorkingDirectory)
   }
 
-  private[polyvariant] def readProcessWorkingDirectory(pid: Int): Option[String] = Zone.acquire { implicit z =>
+  private def readProcessWorkingDirectory(pid: Int): Option[String] = Zone.acquire { implicit z =>
     val buffer = alloc[Byte](VnodeInfoStructSize)
     val bytesWritten = libproc.proc_pidinfo(pid, ProcPidVnodePathInfo, 0L, buffer, VnodeInfoStructSize)
     if (bytesWritten <= 0) {
@@ -51,13 +49,11 @@ class MacOsProbe(debug: Debug) extends PlatformProbe {
       try {
         val bufSize = 65536
         val buf = alloc[Byte](bufSize)
-        val lines = scala.collection.mutable.ListBuffer.empty[String]
         Iterator.continually(stdio.fgets(buf, bufSize, stream.asInstanceOf[Ptr[stdio.FILE]]))
           .takeWhile(_ != null)
           .map(result => fromCString(result).trim)
           .filter(_.nonEmpty)
-          .foreach(lines += _)
-        lines.toList
+          .toList
       } finally {
         val exitStatus = popenlib.pclose(stream)
         debug.log(s"ps exited with status $exitStatus")

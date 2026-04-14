@@ -2,7 +2,7 @@ package org.polyvariant
 
 class PsOutputParsingSuite extends munit.FunSuite {
 
-  val psOutputLines: List[String] = {
+  lazy val psOutputLines: List[String] = {
     val source = scala.io.Source.fromFile("test/ps-output.txt")
     try source.getLines().toList
     finally source.close()
@@ -63,6 +63,35 @@ class PsOutputParsingSuite extends munit.FunSuite {
     val results = MacOsProbe.parsePsLines(lines, selfPid = -1, debug = new Debug(false), cwdResolver = noCwd)
     assertEquals(results.size, 1)
     assertEquals(results.head.memPercent, 0.5)
+  }
+
+  test("excludes process matching selfPid") {
+    val lines = List(" 1531  0,5 184288 /nix/store/zulu/bin/java bloop.BloopServer")
+    val results = MacOsProbe.parsePsLines(lines, selfPid = 1531, debug = new Debug(false), cwdResolver = noCwd)
+    assert(results.isEmpty, "Process matching selfPid should be excluded")
+  }
+
+  test("returns empty list for empty input") {
+    val results = MacOsProbe.parsePsLines(Nil, selfPid = -1, debug = new Debug(false), cwdResolver = noCwd)
+    assertEquals(results.size, 0)
+  }
+
+  test("skips malformed lines (too few fields)") {
+    val lines = List(" 1531  0,5", "badline", " 2000  0.3  65536 /usr/bin/java -cp scala-library.jar scala.tools.nsc.Main")
+    val results = MacOsProbe.parsePsLines(lines, selfPid = -1, debug = new Debug(false), cwdResolver = noCwd)
+    assertEquals(results.size, 1)
+    assertEquals(results.head.pid, 2000)
+  }
+
+  test("classifies Metals and sbt from cmdline patterns") {
+    val lines = List(
+      " 1001  1.0 100000 /usr/bin/java scala.meta.metals.Main",
+      " 1002  2.0 200000 /usr/bin/java xsbt.boot.Boot project"
+    )
+    val results = MacOsProbe.parsePsLines(lines, selfPid = -1, debug = new Debug(false), cwdResolver = noCwd)
+    assertEquals(results.size, 2)
+    assertEquals(results.find(_.pid == 1001).get.kind, "Metals")
+    assertEquals(results.find(_.pid == 1002).get.kind, "sbt")
   }
 
 }
