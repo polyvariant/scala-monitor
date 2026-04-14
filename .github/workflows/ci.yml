@@ -14,8 +14,10 @@ jobs:
         include:
           - os: ubuntu-latest
             artifact: scala-monitor-linux
-          - os: macos-latest
-            artifact: scala-monitor-darwin
+          - os: macos-13
+            artifact: scala-monitor-x86_64-apple-darwin
+          - os: macos-14
+            artifact: scala-monitor-aarch64-apple-darwin
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -23,7 +25,7 @@ jobs:
       - uses: VirtusLab/scala-cli-setup@v1
 
       - name: Unit tests
-        run: scala-cli test .
+        run: scala-cli --power test .
 
       - name: Build native binary
         run: scala-cli --power package . -o scala-monitor --native
@@ -38,6 +40,52 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: scala-monitor
+
+  publish-snapshot:
+    needs: build
+    if: |
+      github.ref == 'refs/heads/main' || 
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: VirtusLab/scala-cli-setup@v1
+
+      - name: Publish snapshot
+        run: |
+          scala-cli config "publish.credentials.central-s01.username" "$SONATYPE_USERNAME"
+          scala-cli config "publish.credentials.central-s01.password" "$SONATYPE_PASSWORD"
+          scala-cli --power publish .
+        env:
+          PGP_SECRET: ${{ secrets.PGP_SECRET }}
+          PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}
+          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+          SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: VirtusLab/scala-cli-setup@v1
+
+      - name: Publish to Sonatype
+        run: |
+          scala-cli config "publish.credentials.central-s01.username" "$SONATYPE_USERNAME"
+          scala-cli config "publish.credentials.central-s01.password" "$SONATYPE_PASSWORD"
+          scala-cli --power publish .
+        env:
+          PGP_SECRET: ${{ secrets.PGP_SECRET }}
+          PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}
+          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+          SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
 
   release:
     needs: build
@@ -54,7 +102,9 @@ jobs:
         run: |
           mkdir -p release-assets
           mv artifacts/scala-monitor-linux/scala-monitor release-assets/scala-monitor-linux
-          mv artifacts/scala-monitor-darwin/scala-monitor release-assets/scala-monitor-darwin
+          mv artifacts/scala-monitor-x86_64-apple-darwin/scala-monitor release-assets/scala-monitor-x86_64-apple-darwin
+          mv artifacts/scala-monitor-aarch64-apple-darwin/scala-monitor release-assets/scala-monitor-aarch64-apple-darwin
+          cp release-assets/scala-monitor-aarch64-apple-darwin release-assets/scala-monitor-darwin
 
       - name: Release
         uses: softprops/action-gh-release@v2
