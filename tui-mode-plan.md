@@ -93,8 +93,8 @@ Confirmation overlay (after Ctrl+K):
 
 | Key | Action |
 |-----|--------|
-| `Up` / `j` | Move selection up |
-| `Down` / `k` | Move selection down |
+| `Up` / `k` | Move selection up |
+| `Down` / `j` | Move selection down |
 | `d` | Send SIGTERM to selected (immediate, status flash) |
 | `Ctrl+K` | Send SIGKILL to selected (confirmation overlay first) |
 | `t` | Thread dump selected (mocked) |
@@ -175,7 +175,7 @@ Add layoutz as a dependency. Munit is already configured (`munit_native0.5:1.3.0
 ```scala
 // Add to libproc @extern object:
 private val ProcPidTaskInfo = 4  // flavor for proc_taskinfo struct
-private val ProcTaskInfoSize = 80  // struct size in bytes
+private val ProcTaskInfoSize = 96  // struct size in bytes (6x uint64 + 12x int32)
 ```
 
 `proc_pidinfo` already exists as an `@extern` in `libproc`. Only the flavor constant and struct size are new.
@@ -190,11 +190,14 @@ private def readThreadCount(pid: Int): Int = Zone.acquire { implicit z =>
   val bytesWritten = libproc.proc_pidinfo(pid, ProcPidTaskInfo, 0L, buffer, ProcTaskInfoSize)
   if (bytesWritten <= 0) 0
   else {
-    val ptr = (buffer + 64).asInstanceOf[Ptr[CUnsignedInt]]
-    !ptr.toInt
+    // pti_threadnum is at offset 84 in struct proc_taskinfo
+    val ptr = (buffer + 84).asInstanceOf[Ptr[CInt]]
+    !ptr
   }
 }
 ```
+
+**NOTE on pointer dereference**: `!ptr` dereferences the pointer (Scala Native's `!` is the dereference operator, not logical NOT). This is correct — it reads the `CInt` value at the pointer address. For `Ptr[CInt]`, `!ptr` returns `Int`. Do NOT write `(!ptr).toInt` (redundant) or `!ptr.toInt` (won't compile — `.toInt` doesn't exist on `CInt`).
 
 **QA**: Build on macOS, run, verify THR column shows real values (not 0). Existing `PsOutputParsingSuite` should still pass (it uses `noCwd` resolver, thread resolver defaults to `_ => 0`).
 
@@ -256,6 +259,8 @@ Extends `LayoutzApp[TuiState, TuiMsg]` from layoutz.
 
 **init**: Call `ScalaMonitor.discover(debug)`, return initial state with processes sorted by RAM descending.
 
+**IMPORTANT**: layoutz's `update` returns `(State, Cmd[Message])`, not bare state. Inside `update`, an implicit converts bare `State` to `(State, Cmd.none)`. But external callers always receive the tuple. All test code must destructure: `val (result, _) = TuiApp.update(msg, state)`.
+
 **update** -- key message handlers:
 
 | Message | Behavior |
@@ -279,13 +284,14 @@ Extends `LayoutzApp[TuiState, TuiMsg]` from layoutz.
 **subscriptions**:
 
 ```scala
+val confirming = state.confirmation != ConfirmationKind.None
 Sub.batch(
   Sub.time.everyMs(1000, RefreshProcesses),
   Sub.time.everyMs(100, TickFrame),
   Sub.onKeyPress {
     case Key.Char('q')                     => Some(Quit)
-    case Key.Up | Key.Char('j')             => Some(MoveUp)
-    case Key.Down | Key.Char('k')           => Some(MoveDown)
+    case Key.Up | Key.Char('k')             => Some(MoveUp)
+    case Key.Down | Key.Char('j')           => Some(MoveDown)
     case Key.Char('d')                      => Some(RequestSigterm)
     case Key.Ctrl('K')                      => Some(RequestSigkill)
     case Key.Char('t')                      => Some(RequestThreadDump)
@@ -311,8 +317,8 @@ Sub.batch(
 
 ```scala
 def run(debug: Boolean): Unit = {
-  debugEnabled = debug
-  TuiAppImpl.run(
+  val app = new TuiApp()  // concrete instance of LayoutzApp
+  app.run(
     tickIntervalMs = 100,
     renderIntervalMs = 50,
     clearOnStart = true,
@@ -322,6 +328,8 @@ def run(debug: Boolean): Unit = {
   )
 }
 ```
+
+**NOTE**: `LayoutzApp.run(tickIntervalMs, ...)` is inherited. The companion `run(debug)` calls it on the instance via `app.run(...)`. The two methods have different parameter types so overloading resolves correctly.
 
 #### ScalaMonitor.scala changes (minimal -- existing behavior untouched):
 
@@ -496,7 +504,9 @@ Tests run in JVM mode by default (fast, no native compilation needed). The TUI l
 
 #### `TuiStateTest.scala` -- State transition tests
 
-Tests the pure `update(msg, state) -> state` function for every message type.
+Tests the pure `update(msg, state) -> (State, Cmd[Msg])` function for every message type.
+
+**NOTE**: `LayoutzApp.update` returns `(State, Cmd[Message])`, not bare `State`. All tests must destructure the tuple. The implicit conversion `(State) => (State, Cmd.none)` only works inside the `update` implementation itself.
 
 ```scala
 object TuiStateTest extends munit.FunSuite {
@@ -519,42 +529,45 @@ object TuiStateTest extends munit.FunSuite {
     tickFrame = 0
   )
 
+  /** Helper: call update and discard the Cmd, return only the State */
+  private def updateState(msg: TuiMsg, state: TuiState = initialState): TuiState =
+    TuiApp.update(msg, state)._1
+
   test("MoveUp at top stays at top") {
-    val result = TuiApp.update(MoveUp, initialState)
+    val result = updateState(MoveUp)
     assertEquals(result.selectedIndex, 0)
   }
 
   test("MoveDown increments selectedIndex") {
-    val result = TuiApp.update(MoveDown, initialState)
+    val result = updateState(MoveDown)
     assertEquals(result.selectedIndex, 1)
   }
 
   test("MoveDown at bottom stays at bottom") {
     val atBottom = initialState.copy(selectedIndex = 2)
-    val result = TuiApp.update(MoveDown, atBottom)
+    val result = updateState(MoveDown, atBottom)
     assertEquals(result.selectedIndex, 2)
   }
 
   test("SortCycle changes sort column") {
-    val result = TuiApp.update(SortCycle, initialState)
+    val result = updateState(SortCycle)
     assertNotEquals(result.sortColumn, SortColumn.Ram)
   }
 
   test("SortCycle toggles direction on same column") {
     val sorted = initialState.copy(sortColumn = SortColumn.Ram, sortDescending = true)
-    val result = TuiApp.update(SortCycle, sorted)
+    val result = updateState(SortCycle, sorted)
     assertEquals(result.sortDescending, false)
   }
 
   test("RequestSigterm sets status flash") {
-    // Note: real kill is mocked in test by overriding ProcessActions
-    val result = TuiApp.update(RequestSigterm, initialState)
+    val result = updateState(RequestSigterm)
     assert(result.statusMessage.exists(_.contains("SIGTERM")))
     assert(result.confirmation == ConfirmationKind.None)
   }
 
   test("RequestSigkill enters confirmation mode") {
-    val result = TuiApp.update(RequestSigkill, initialState)
+    val result = updateState(RequestSigkill)
     assertEquals(result.confirmation, ConfirmationKind.Sigkill)
     assertEquals(result.confirmTargetPid, Some(100))
   }
@@ -564,7 +577,7 @@ object TuiStateTest extends munit.FunSuite {
       confirmation = ConfirmationKind.Sigkill,
       confirmTargetPid = Some(100)
     )
-    val result = TuiApp.update(ConfirmKill, confirming)
+    val result = updateState(ConfirmKill, confirming)
     assertEquals(result.confirmation, ConfirmationKind.None)
     assertEquals(result.confirmTargetPid, None)
     assert(result.statusMessage.exists(_.contains("SIGKILL")))
@@ -575,23 +588,23 @@ object TuiStateTest extends munit.FunSuite {
       confirmation = ConfirmationKind.Sigkill,
       confirmTargetPid = Some(100)
     )
-    val result = TuiApp.update(CancelConfirmation, confirming)
+    val result = updateState(CancelConfirmation, confirming)
     assertEquals(result.confirmation, ConfirmationKind.None)
     assertEquals(result.statusMessage, None)
   }
 
   test("RequestThreadDump sets status flash") {
-    val result = TuiApp.update(RequestThreadDump, initialState)
+    val result = updateState(RequestThreadDump)
     assert(result.statusMessage.exists(_.contains("Thread dump")))
   }
 
   test("RequestHeapDump sets status flash") {
-    val result = TuiApp.update(RequestHeapDump, initialState)
+    val result = updateState(RequestHeapDump)
     assert(result.statusMessage.exists(_.contains("Heap dump")))
   }
 
   test("TickFrame increments frame counter") {
-    val result = TuiApp.update(TickFrame, initialState)
+    val result = updateState(TickFrame)
     assertEquals(result.tickFrame, 1)
   }
 
@@ -600,7 +613,7 @@ object TuiStateTest extends munit.FunSuite {
       statusMessage = Some("test"),
       statusMessageExpiresAt = System.currentTimeMillis() - 1000
     )
-    val result = TuiApp.update(TickFrame, withFlash)
+    val result = updateState(TickFrame, withFlash)
     assertEquals(result.statusMessage, None)
   }
 
@@ -609,12 +622,12 @@ object TuiStateTest extends munit.FunSuite {
       statusMessage = Some("test"),
       statusMessageExpiresAt = System.currentTimeMillis() + 5000
     )
-    val result = TuiApp.update(TickFrame, withFlash)
+    val result = updateState(TickFrame, withFlash)
     assertEquals(result.statusMessage, Some("test"))
   }
 
   test("ProcessesLoaded clamps selectedIndex if list shrinks") {
-    val result = TuiApp.update(
+    val result = updateState(
       ProcessesLoaded(List(sampleProcesses.head)),
       initialState.copy(selectedIndex = 2)
     )
@@ -656,7 +669,7 @@ object TuiViewTest extends munit.FunSuite with SnapshotTest {
     val rendered = TuiApp.view(state).render
     assert(rendered.contains("100"))           // PID present
     assert(rendered.contains("sbt"))            // type present
-    assert(rendered.contains("2.0 MB"))         // RAM formatted
+    assert(rendered.contains("2.0 GB"))         // RAM formatted (2048000 KB = ~2 GB)
     assert(rendered.contains("7.3%"))           // MEM% present
     assert(rendered.contains("n/a"))            // swap None on macOS
     assert(rendered.contains("~/project"))      // project path
@@ -760,6 +773,8 @@ object ProcessActionsTest extends munit.FunSuite {
 
 #### `SortTest.scala` -- Sort logic tests
 
+Tests the public `TuiApp.sort` method. This must be defined on `TuiApp` as a standalone function (not inside `update`) so it can be reused by both `update(SortCycle)` and tests.
+
 ```scala
 object SortTest extends munit.FunSuite {
 
@@ -790,6 +805,22 @@ object SortTest extends munit.FunSuite {
     assertEquals(result.head.kind, "sbt")
     assertEquals(result.last.kind, "Bloop")
   }
+}
+```
+
+**Implementation note**: `TuiApp.sort` should be defined as:
+
+```scala
+def sort(procs: List[ScalaProcess], column: SortColumn, ascending: Boolean): List[ScalaProcess] = {
+  val ordering = column match {
+    case SortColumn.Pid       => Ordering.by(_.pid)
+    case SortColumn.Kind      => Ordering.by(_.kind)
+    case SortColumn.Ram       => Ordering.by(_.ramKb)
+    case SortColumn.MemPercent => Ordering.by(_.memPercent)
+    case SortColumn.Project  => Ordering.by(_.projectPath)
+  }
+  val sorted = ordering.sort(procs)
+  if (ascending) sorted else sorted.reverse
 }
 ```
 

@@ -95,6 +95,22 @@ else
   PASS=false
 fi
 
+if "$MONITOR" --help | grep -q "watch"; then
+  echo "  PASS: --help contains watch"
+else
+  echo "  FAIL: --help missing watch"
+  PASS=false
+fi
+
+# Verify one-shot mode still works with -o pid
+PID_OUTPUT=$("$MONITOR" -o pid)
+if [ -n "$PID_OUTPUT" ]; then
+  echo "  PASS: -o pid returns PIDs"
+else
+  echo "  FAIL: -o pid returned empty"
+  PASS=false
+fi
+
 if $PASS; then
   echo ""
   echo "ALL ASSERTIONS PASSED"
