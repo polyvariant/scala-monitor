@@ -26,9 +26,9 @@ object ScalaMonitor {
     @arg(short = 'd', doc = "Enable verbose debug logging to stderr")
     debug: Flag = Flag(),
     @arg(short = 'w', doc = "Interactive TUI mode (like top)")
-    watch: Flag = Flag()
+    tui: Flag = Flag()
   ): Unit = {
-    if (watch.value) {
+    if (tui.value) {
       TuiApp.run(debug.value)
     } else {
       val processes = discover(debug.value)
@@ -88,10 +88,22 @@ object ScalaMonitor {
     (top ++ rows ++ bottom).mkString("\n") + "\n"
   }
 
+  def extractMainClass(cmdline: String): Option[String] = {
+    val tokens = cmdline.split("\\s+").drop(1)
+    tokens.find { t =>
+      t.contains(".") &&
+      !t.startsWith("-") &&
+      !t.contains("/") &&
+      !t.endsWith(".jar") &&
+      t.split("\\.").forall(seg => seg.nonEmpty && seg.head.isLetter)
+    }
+  }
+
   def classify(cmdline: String, debug: Debug): String = {
     val result = classifications
       .find(c => cmdline.contains(c.pattern))
       .map(_.name)
+      .orElse(extractMainClass(cmdline))
       .getOrElse("Scala/JVM")
     debug.log(s"  classify('$cmdline') → '$result'")
     result

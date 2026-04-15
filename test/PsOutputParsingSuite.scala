@@ -19,13 +19,13 @@ class PsOutputParsingSuite extends munit.FunSuite {
     assertEquals(bloop.get.ramKb, 184288L)
   }
 
-  test("detects mill daemon but classifies it as Scala/JVM (missing classification for MillDaemonMain)") {
+  test("detects mill daemon and classifies it by main class") {
     val results = MacOsProbe.parsePsLines(psOutputLines, selfPid = -1, debug = new Debug(false), cwdResolver = noCwd)
     val mill = results.find(_.pid == 2983)
     assert(mill.isDefined, s"Expected mill daemon (PID 2983) to be detected but got: ${results.map(_.kind)}")
     assertEquals(mill.get.memPercent, 0.2)
     assertEquals(mill.get.ramKb, 75664L)
-    assertEquals(mill.get.kind, "Scala/JVM", "mill.daemon.MillDaemonMain is not in the classification list, so it falls through to Scala/JVM")
+    assertEquals(mill.get.kind, "mill.daemon.MillDaemonMain", "mill.daemon.MillDaemonMain is not in the classification list, so extractMainClass is used")
   }
 
   test("does not detect mill native launcher (no scala indicators in binary name)") {
@@ -39,7 +39,8 @@ class PsOutputParsingSuite extends munit.FunSuite {
     assertEquals(results.size, 3, s"Expected exactly 3 Scala processes, got ${results.size} with kinds: ${results.map(_.kind)}")
     val kinds = results.map(_.kind).toSet
     assert(kinds.contains("Bloop"), "Bloop server should be classified as Bloop")
-    assert(kinds.contains("Scala/JVM"), "Mill daemon and user app should fall through to Scala/JVM")
+    assert(kinds.contains("mill.daemon.MillDaemonMain"), "Mill daemon should be classified by main class")
+    assert(kinds.contains("com.example.myapp.Main"), "User app should be classified by main class")
   }
 
   test("does not detect non-JVM processes like zsh, docker, launchd") {
@@ -92,6 +93,48 @@ class PsOutputParsingSuite extends munit.FunSuite {
     assertEquals(results.size, 2)
     assertEquals(results.find(_.pid == 1001).get.kind, "Metals")
     assertEquals(results.find(_.pid == 1002).get.kind, "sbt")
+  }
+
+  test("extractMainClass finds FQN from java cmdline") {
+    assertEquals(
+      ScalaMonitor.extractMainClass("java -Xmx2g -cp app.jar com.example.myapp.Server"),
+      Some("com.example.myapp.Server")
+    )
+  }
+
+  test("extractMainClass returns None when no FQN present") {
+    assertEquals(
+      ScalaMonitor.extractMainClass("java -Xmx2g -cp app.jar"),
+      None
+    )
+  }
+
+  test("extractMainClass rejects flags and paths") {
+    assertEquals(
+      ScalaMonitor.extractMainClass("java -Dfoo=bar -Xmx2g"),
+      None
+    )
+  }
+
+  test("classify falls back to main class before Scala/JVM") {
+    assertEquals(
+      ScalaMonitor.classify("java -cp app.jar com.example.myapp.Main", new Debug(false)),
+      "com.example.myapp.Main"
+    )
+  }
+
+  test("classify still returns Scala/JVM when no main class found") {
+    assertEquals(
+      ScalaMonitor.classify("java -Xmx2g", new Debug(false)),
+      "Scala/JVM"
+    )
+  }
+
+  test("classify prefers known pattern over main class extraction") {
+    assertEquals(
+      ScalaMonitor.classify("java -cp app.jar bloop.BloopServer", new Debug(false)),
+      "Bloop"
+    )
   }
 
 }

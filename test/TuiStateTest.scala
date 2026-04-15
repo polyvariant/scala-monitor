@@ -19,7 +19,8 @@ class TuiStateTest extends munit.FunSuite {
     statusMessageExpiresAt = 0L,
     confirmation = ConfirmationKind.None,
     confirmTargetPid = None,
-    tickFrame = 0
+    tickFrame = 0,
+    termWidth = 80
   )
 
   private def updateState(msg: TuiMsg, state: TuiState = initialState): TuiState =
@@ -130,5 +131,38 @@ class TuiStateTest extends munit.FunSuite {
   test("Quit returns exit command") {
     val (_, cmd) = (new TuiApp(false)).update(Quit, initialState)
     assertEquals(cmd, Cmd.exit)
+  }
+
+  test("ToggleHelp toggles showHelp on") {
+    val result = updateState(ToggleHelp)
+    assertEquals(result.showHelp, true)
+  }
+
+  test("ToggleHelp toggles showHelp off") {
+    val withHelp = initialState.copy(showHelp = true)
+    val result = updateState(ToggleHelp, withHelp)
+    assertEquals(result.showHelp, false)
+  }
+
+  test("JumpToFirst sets selectedIndex to 0") {
+    val atBottom = initialState.copy(selectedIndex = 2)
+    val result = updateState(JumpToFirst, atBottom)
+    assertEquals(result.selectedIndex, 0)
+  }
+
+  test("JumpToFirst at top stays at top") {
+    val result = updateState(JumpToFirst)
+    assertEquals(result.selectedIndex, 0)
+  }
+
+  test("JumpToLast sets selectedIndex to last process") {
+    val result = updateState(JumpToLast)
+    assertEquals(result.selectedIndex, 2)
+  }
+
+  test("JumpToLast at bottom stays at bottom") {
+    val atBottom = initialState.copy(selectedIndex = 2)
+    val result = updateState(JumpToLast, atBottom)
+    assertEquals(result.selectedIndex, 2)
   }
 }

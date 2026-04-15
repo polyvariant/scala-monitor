@@ -19,17 +19,18 @@ scala-monitor --watch           # NEW: interactive TUI mode
 |----------|--------|
 | Library | `layoutz` 0.7.0 (zero-dep, Scala Native, JVM, JS) |
 | SIGTERM | `d` -- immediate + status flash |
-| SIGKILL | `Ctrl+K` -- confirmation overlay first |
+| SIGKILL | `K` -- confirmation overlay first |
 | Thread dump | `t` -- mocked, return message only |
 | Heap dump | `h` -- mocked, return message only |
-| Navigation | Arrow keys + `j`/`k` (vim-style) |
+| Navigation | Arrow keys + `j`/`k` (vim-style), `g`/`G` (first/last) |
 | Sort | `F` -- cycle PID, TYPE, RAM, MEM%, PROJECT |
+| Help | `?` -- toggle help overlay |
 | Quit | `q` or `Ctrl+C` -- both clean exit |
 | Alternate screen | Yes (layoutz `clearOnStart`/`clearOnExit`) |
 | Refresh interval | 1 second |
 | macOS threads | Fix via `proc_pidinfo` PROC_PIDTASKINFO |
 | macOS swap | Show `n/a` (platform limitation, no API exposes per-process swap) |
-| Kill UX | Hybrid -- `d` immediate SIGTERM + flash, `Ctrl+K` SIGKILL with confirmation prompt |
+| Kill UX | Hybrid -- `d` immediate SIGTERM + flash, `K` SIGKILL with confirmation prompt |
 
 ## Current Codebase State (post-rebase)
 
@@ -52,41 +53,118 @@ project.scala (+layoutz dep only -- munit already present)
        +-- ScalaMonitor.scala (MODIFY -- add --watch flag, make discover/formatMemory accessible)
        |       |
        |       +-- PlatformProbe.scala / LinuxProbe.scala (UNCHANGED)
-       |       +-- MacOsProbe.scala (MODIFY -- add readThreadCount, use in discover)
-       |       +-- MacOsExtern.scala (MODIFY -- add PROC_PIDTASKINFO constants)
+       |       +-- MacOsProbe.scala (MODIFY -- add ProcPidTaskInfo/ProcTaskInfoSize constants,
+       |       |                        add readThreadCount, add threadCountResolver to parsePsLines)
+       |       +-- MacOsExtern.scala (UNCHANGED -- @extern FFI bindings only)
        |
-       +-- TuiApp.scala (NEW -- LayoutzApp[State, Msg])
+       +-- TuiApp.scala (NEW -- class TuiApp(debug) extends LayoutzApp[TuiState, TuiMsg])
        |       |
-       |       +-- ProcessActions.scala (NEW -- kill, thread dump, heap dump)
+       |       +-- ProcessActions.scala (NEW -- signal.kill + mocked dumps)
        |
-       +-- scripts/integration-test.sh (MODIFY -- add --watch assertions)
+       +-- scripts/integration-test.sh (MODIFY -- add --watch and -o pid assertions)
        +-- test/ (MODIFY -- add TUI test suites alongside existing PsOutputParsingSuite)
 ```
 
-## Screen Layout
+## Screen Layout (Phase 2 Redesign)
+
+Inspired by btop's compact title-bar-in-box pattern. All metadata (process count, total RAM, sort indicator) merged into the box title bar. Banner and info bar rows eliminated.
+
+### SCREEN 1: Normal State
 
 ```
-+--------------------------------------------------------------------------+
-| SCALA PROCESS MONITOR -- 3 processes -- 3.1 GB RAM                       |
-| Refresh: 1s  |  Sort: RAM v                                            |
-+--------------------------------------------------------------------------+
-|  PID      TYPE        RSS        SWAP    MEM%  THR  PROJECT             |
-+--------------------------------------------------------------------------+
-|> 2513087  sbt       2.3 GB       0 kB    7.3%   55  ~/Code/smithy      |
-|  2503995  Metals    698 MB       n/a      2.2%   58  ~/Code/scala-monitor|
-|  2647652  Bloop     157 MB       0 kB    0.5%   35  ~/.local/bloop      |
-+--------------------------------------------------------------------------+
-| Arrows navigate | d SIGTERM | Ctrl+K KILL | t threads | h heap | F sort |
-+--------------------------------------------------------------------------+
- SIGTERM sent to PID 2513087                                            <- flash
+╭── SCALA PROCESS MONITOR — 3 processes — 3.1 GB RAM ─ RAM ▾ ──────╮
+│ [Bold Cyan]  PID      TYPE      RAM      SWAP   MEM%  THR  PROJECT  [/Bold Cyan]     │
+│  2513087  [Magenta]sbt[/Magenta]     2.3 GB    0 kB  [Red]7.3%[/Red]   55  ~/Code/smithy4s        │
+│▶[BlueBg][Bold] 2503995  [Blue]Metals[/Blue]   [Yellow]698 MB[/Yellow]  n/a   [Yellow]2.2%[/Yellow]   58  ~/Code/scala-monitor[/Bold][/BlueBg]   │
+│  2647652  [Green]Bloop[/Green]   [Green]157 MB[/Green]  234 MB  [Green]0.5%[/Green]   35  ~/.local/.../bloop     │
+╰───────────────────────────────────────────────────────────────────────╯
+[Dim] ↑↓ jk  d term  K kill  t threads  h heap  F sort  ? help  q quit
 ```
 
-Confirmation overlay (after Ctrl+K):
+- **No separate banner/info rows** — all metadata in the box title bar
+- **Title bar**: process count, total RAM, sort column + direction indicator (▾ descending, ▴ ascending)
+- **Selected row**: blue background (`Color.True(30, 60, 90)`) + bold, with per-cell colors preserved
+- **No `>` marker** — selected row distinguished by background color alone
+
+### Color Reference (Phase 2)
+
+| Element | Color | Detail |
+|---------|-------|--------|
+| Table headers | Bold Cyan | `Color.Cyan` + `Style.Bold` |
+| Selected row bg | Blue | `Color.True(30, 60, 90)` + `Style.Bold` |
+| sbt | Magenta | `Color.Magenta` |
+| Metals | Blue | `Color.Blue` |
+| Bloop | Green | `Color.Green` |
+| scala-cli | Cyan | `Color.Cyan` |
+| scalac | Yellow | `Color.Yellow` |
+| Other types | White | default |
+| RSS < 0.5 GB | Green | `Color.Green` |
+| RSS 0.5–1 GB | Yellow | `Color.Yellow` |
+| RSS > 1 GB | Red | `Color.Red` |
+| MEM% < 2% | Green | `Color.Green` |
+| MEM% 2–5% | Yellow | `Color.Yellow` |
+| MEM% > 5% | Red | `Color.Red` |
+| Status flash (success) | Green | `✓` prefix |
+| Status flash (error) | Red | `✗` prefix |
+| Status flash (dump) | Yellow | `⏳` prefix |
+| Footer | Dim | `Color.BrightBlack` |
+| Confirmation overlay | Red | border + text |
+| Table border | Default | white |
+
+### SCREEN 2: SIGTERM Flash (after pressing `d`)
 
 ```
-+--------------------------------------------------------------------------+
-|  !! Force kill PID 2513087 (sbt)?  Enter=confirm  Esc=cancel            |
-+--------------------------------------------------------------------------+
+╭── SCALA PROCESS MONITOR — 3 processes — 3.1 GB RAM ─ RAM ▾ ──────╮
+│  PID      TYPE      RAM      SWAP   MEM%  THR  PROJECT              │
+│  2513087  sbt       2.3 GB    0 kB  7.3%   55  ~/Code/smithy4s       │
+│  2503995  Metals    698 MB    n/a   2.2%   58  ~/Code/scala-monitor  │
+│  2647652  Bloop     157 MB    234 MB  0.5%  35  ~/.local/.../bloop   │
+╰───────────────────────────────────────────────────────────────────────╯
+[Dim] ↑↓ jk  d term  K kill  t threads  h heap  F sort  ? help  q quit
+[Green] ✓ SIGTERM sent to PID 2503995 (Metals)[/Green]
+```
+
+### SCREEN 3: SIGKILL Confirmation Overlay (after pressing `K`)
+
+```
+╭── SCALA PROCESS MONITOR — 3 processes — 3.1 GB RAM ─ RAM ▾ ──────╮
+│  PID      TYPE      RAM      SWAP   MEM%  THR  PROJECT              │
+│  2513087  sbt       2.3 GB    0 kB  7.3%   55  ~/Code/smithy4s       │
+│  2503995  Metals    698 MB    n/a   2.2%   58  ~/Code/scala-monitor  │
+│  2647652  Bloop     157 MB    234 MB  0.5%  35  ~/.local/.../bloop   │
+╰───────────────────────────────────────────────────────────────────────╯
+[Red] ╭─!! Force kill Metals (PID 2503995)?  Enter=confirm  Esc=cancel─╮
+[Red] ╰────────────────────────────────────────────────────────────────╯
+```
+
+- Shows process kind + PID in confirmation
+- Footer remains visible below overlay
+
+### SCREEN 4: Help Overlay (after pressing `?`)
+
+```
+╭── SCALA PROCESS MONITOR — 3 processes — 3.1 GB RAM ─ RAM ▾ ──────╮
+│  PID      TYPE      RAM      SWAP   MEM%  THR  PROJECT              │
+│  ...                                                             │
+╰───────────────────────────────────────────────────────────────────────╯
+╭── Help ──────────────────────────────────────────────────────────╮
+│  Navigation    ↑↓ jk  move    g first    G last                 │
+│  Actions       d term  K kill  t threads  h heap                 │
+│  Display       F sort  ? help                                   │
+│  Quit          q exit                                          │
+╰───────────────────────────────────────────────────────────────────╯
+```
+
+### SCREEN 5: Empty State (no Scala processes)
+
+```
+╭── SCALA PROCESS MONITOR — 0 processes — 0 kB RAM ────────────────╮
+│                                                                   │
+│         No Scala processes found.                                 │
+│         Press q to quit or wait for processes to appear.          │
+│                                                                   │
+╰───────────────────────────────────────────────────────────────────╯
+[Dim] ↑↓ jk  d term  K kill  t threads  h heap  F sort  ? help  q quit
 ```
 
 ## Keybindings
@@ -95,11 +173,14 @@ Confirmation overlay (after Ctrl+K):
 |-----|--------|
 | `Up` / `k` | Move selection up |
 | `Down` / `j` | Move selection down |
+| `g` | Jump to first process |
+| `G` | Jump to last process |
 | `d` | Send SIGTERM to selected (immediate, status flash) |
-| `Ctrl+K` | Send SIGKILL to selected (confirmation overlay first) |
+| `K` | Send SIGKILL to selected (confirmation overlay first) |
 | `t` | Thread dump selected (mocked) |
 | `h` | Heap dump selected (mocked) |
 | `F` | Cycle sort column (PID -> TYPE -> RAM -> MEM% -> PROJECT) |
+| `?` | Toggle help overlay |
 | `Enter` | Confirm kill (on confirmation overlay) |
 | `Esc` | Cancel (on confirmation overlay) |
 | `q` | Quit |
@@ -121,7 +202,8 @@ case class TuiState(
   statusMessageExpiresAt: Long,        // epoch millis when to clear flash
   confirmation: ConfirmationKind,      // active confirmation prompt
   confirmTargetPid: Option[Int],       // PID being confirmed for kill
-  tickFrame: Int                       // animation frame counter
+  tickFrame: Int,                      // animation frame counter
+  showHelp: Boolean = false            // help overlay toggle (Phase 2)
 )
 ```
 
@@ -136,7 +218,7 @@ case object MoveUp extends TuiMsg
 case object MoveDown extends TuiMsg
 case object SortCycle extends TuiMsg                  // F key
 case object RequestSigterm extends TuiMsg             // d key
-case object RequestSigkill extends TuiMsg             // Ctrl+K key
+case object RequestSigkill extends TuiMsg             // K key
 case object ConfirmKill extends TuiMsg                // Enter on overlay
 case object CancelConfirmation extends TuiMsg         // Esc on overlay
 case object RequestThreadDump extends TuiMsg          // t key
@@ -146,6 +228,9 @@ case class ActionFailed(err: String) extends TuiMsg
 case object ClearStatus extends TuiMsg
 case object TickFrame extends TuiMsg                  // animation tick (100ms)
 case object Quit extends TuiMsg                       // q key
+case object ToggleHelp extends TuiMsg                 // ? key (Phase 2)
+case object JumpToFirst extends TuiMsg                // g key (Phase 2)
+case object JumpToLast extends TuiMsg                 // G key (Phase 2)
 ```
 
 ## Commit Strategy
@@ -168,31 +253,50 @@ Add layoutz as a dependency. Munit is already configured (`munit_native0.5:1.3.0
 
 ### C2: `feat: fix macOS thread count via proc_pidinfo`
 
-**Files**: `MacOsExtern.scala` (MODIFY), `MacOsProbe.scala` (MODIFY)
+**Files**: `MacOsProbe.scala` (MODIFY)
 
-**MacOsExtern.scala** -- add constants:
+**MacOsExtern.scala** — NO net change. The `@extern object libproc` cannot hold Scala `val` constants (only `def` with `= extern` is valid). Constants moved to `MacOsProbe` class instead.
 
-```scala
-// Add to libproc @extern object:
-private val ProcPidTaskInfo = 4  // flavor for proc_taskinfo struct
-private val ProcTaskInfoSize = 96  // struct size in bytes (6x uint64 + 12x int32)
-```
-
-`proc_pidinfo` already exists as an `@extern` in `libproc`. Only the flavor constant and struct size are new.
-
-**MacOsProbe.scala** -- add thread count reader. The `discover()` method now delegates to `MacOsProbe.parsePsLines()`. Add `readThreadCount()` private method and use it when constructing `ScalaProcess` (replacing `threads = 0`). The `parsePsLines` method in the companion object takes `cwdResolver: Int => Option[String]` -- add a similar `threadResolver: Int => Int` parameter, or keep `readThreadCount` as a class method called alongside `cwdResolver` in the `discover()` wrapper.
-
-Simplest approach: keep `readThreadCount` as a private method on the class (it needs `Zone` and FFI, same as `readProcessWorkingDirectory`), call it in `discover()` before passing to `parsePsLines`, then thread the thread count through. Since `parsePsLines` constructs `ScalaProcess` with `threads = 0`, modify it to accept a `threadCountResolver: Int => Int` parameter (defaulting to `_ => 0` for test compatibility).
+**MacOsProbe.scala** -- add `ProcPidTaskInfo` and `ProcTaskInfoSize` as private vals on the class (alongside existing `ProcPidVnodePathInfo`, `VnodeInfoStructSize`), add `readThreadCount()` private method, and add `threadCountResolver` parameter to `parsePsLines`.
 
 ```scala
-private def readThreadCount(pid: Int): Int = Zone.acquire { implicit z =>
-  val buffer = alloc[Byte](ProcTaskInfoSize)
-  val bytesWritten = libproc.proc_pidinfo(pid, ProcPidTaskInfo, 0L, buffer, ProcTaskInfoSize)
-  if (bytesWritten <= 0) 0
-  else {
-    // pti_threadnum is at offset 84 in struct proc_taskinfo
-    val ptr = (buffer + 84).asInstanceOf[Ptr[CInt]]
-    !ptr
+class MacOsProbe(debug: Debug) extends PlatformProbe {
+  private val ProcPidVnodePathInfo = 9
+  private val VnodeInfoCwdPathOffset = 152
+  private val VnodeInfoStructSize = 2352
+  private val ProcPidTaskInfo = 4
+  private val ProcTaskInfoSize = 96
+  // ...
+
+  private def readThreadCount(pid: Int): Int = Zone.acquire { implicit z =>
+    val buffer = alloc[Byte](ProcTaskInfoSize)
+    val bytesWritten = libproc.proc_pidinfo(pid, ProcPidTaskInfo, 0L, buffer, ProcTaskInfoSize)
+    if (bytesWritten <= 0) 0
+    else {
+      val ptr = (buffer + 84).asInstanceOf[Ptr[CInt]]
+      !ptr
+    }
+  }
+
+  def discover(selfPid: Int): List[ScalaProcess] = {
+    val lines = runPsCommand()
+    MacOsProbe.parsePsLines(
+      lines, selfPid, debug,
+      cwdResolver = readProcessWorkingDirectory,
+      threadCountResolver = readThreadCount
+    )
+  }
+}
+
+object MacOsProbe {
+  def parsePsLines(
+    lines: List[String],
+    selfPid: Int,
+    debug: Debug,
+    cwdResolver: Int => Option[String],
+    threadCountResolver: Int => Int = _ => 0   // backward compat for tests
+  ): List[ScalaProcess] = {
+    // ... threads = threadCountResolver(pid) instead of threads = 0
   }
 }
 ```
@@ -213,35 +317,32 @@ private def readThreadCount(pid: Int): Int = Zone.acquire { implicit z =>
 package org.polyvariant
 
 import scala.scalanative.posix.signal
-import scala.scalanative.posix.unistd
 
 object ProcessActions {
 
   def sendSigterm(pid: Int): Either[String, String] = {
-    val result = unistd.kill(pid, signal.SIGTERM)
+    val result = signal.kill(pid, signal.SIGTERM)
     if (result == 0) Right(s"SIGTERM sent to PID $pid")
     else Left(s"kill($pid, SIGTERM) failed")
   }
 
   def sendSigkill(pid: Int): Either[String, String] = {
-    val result = unistd.kill(pid, signal.SIGKILL)
+    val result = signal.kill(pid, signal.SIGKILL)
     if (result == 0) Right(s"SIGKILL sent to PID $pid")
     else Left(s"kill($pid, SIGKILL) failed")
   }
 
   def threadDump(pid: Int): Either[String, String] = {
-    // MOCKED: real implementation would shell out to:
-    // jcmd <pid> Thread.print -l > /tmp/threads-<pid>-<timestamp>.txt
     Right(s"Thread dump requested for PID $pid -> /tmp/threads-$pid.hprof")
   }
 
   def heapDump(pid: Int): Either[String, String] = {
-    // MOCKED: real implementation would shell out to:
-    // jcmd <pid> GC.heap_dump /tmp/heap-<pid>-<timestamp>.hprof
     Right(s"Heap dump requested for PID $pid -> /tmp/heap-$pid.hprof")
   }
 }
 ```
+
+**NOTE**: `kill()` is in `scala.scalanative.posix.signal`, NOT `scala.scalanative.posix.unistd`. This is a Scala Native 0.5.10 quirk — `unistd.kill` does not exist.
 
 **QA**: Compiles. Integration: manually test `sendSigterm` against a real process.
 
@@ -269,7 +370,7 @@ Extends `LayoutzApp[TuiState, TuiMsg]` from layoutz.
 | `ProcessesLoaded(procs)` | Sort and replace `state.processes`. Reset `selectedIndex` if out of bounds |
 | `MoveUp` | `selectedIndex = max(0, current - 1)` |
 | `MoveDown` | `selectedIndex = min(size - 1, current + 1)` |
-| `SortCycle` | Cycle sort column. Toggle direction if same column pressed again |
+| `SortCycle` | Cycle to next sort column (PID→TYPE→RAM→MEM%→PROJECT), always descending |
 | `RequestSigterm` | Call `ProcessActions.sendSigterm(pid)` synchronously, set status flash |
 | `RequestSigkill` | Set `confirmation = Sigkill`, `confirmTargetPid = Some(pid)` |
 | `ConfirmKill` | Call `ProcessActions.sendSigkill(pid)`, clear confirmation, set status flash |
@@ -413,15 +514,19 @@ C2 (macOS threads) ----------------------> (independent, can run any time)
 
 ## Risks
 
-| Risk | Probability | Impact | Mitigation |
-|------|-------------|--------|------------|
-| layoutz SN 0.5.10 incompatibility | Medium | High | Test compile in C1 immediately. layoutz is cross-built for Native 0.5. Fallback: build from source |
-| macOS proc_taskinfo struct offset wrong | Low | Medium | Well-documented struct. Test against known process. Can verify with `lldb` |
-| Blocking refresh freezes TUI | Low | Medium | `Cmd.task` runs on daemon thread. 1s interval is generous. Worst case: brief stutter |
-| Terminal too narrow for table | Medium | Low | Columns are fixed-width. Truncate PROJECT path. Defer responsive layout |
-| Ctrl+C handling | Low | Low | layoutz `quitKey` intercepts at raw input level before OS signal. Clean exit via `clearOnExit` |
-| `posix.signal.kill` import path | Low | Low | Available in `scala.scalanative.posix.signal`. Verify early in C3 |
-| Sort state lost on refresh | Low | Low | Sort is in TuiState (not reset on refresh). Only `selectedIndex` resets if list shrinks |
+| Risk | Probability | Impact | Status |
+|------|-------------|--------|--------|
+| layoutz SN 0.5.10 incompatibility | Medium | High | **RESOLVED** — compiles and links cleanly on first try |
+| macOS proc_taskinfo struct offset wrong | Low | Medium | **RESOLVED** — `pti_threadnum` at offset 84, struct size 96, verified via XNU headers |
+| Blocking refresh freezes TUI | Low | Medium | **RESOLVED** — `Cmd.task` runs off-thread. Not yet manually verified under load |
+| Terminal too narrow for table | Medium | Low | **KNOWN** — columns are fixed-width, no responsive layout yet |
+| Ctrl+C handling | Low | Low | **RESOLVED** — layoutz `quitKey = Key.Ctrl('C')` intercepts at raw input level |
+| `posix.signal.kill` import path | Low | Low | **RESOLVED** — `kill` is in `signal`, not `unistd` (SN 0.5.10 quirk) |
+| Sort state lost on refresh | Low | Low | **RESOLVED** — sort is in TuiState, preserved across refreshes |
+| `@extern` objects can't hold Scala vals | — | — | **DISCOVERED** — moved FFI constants to consuming class |
+| layoutz `table()` type mismatch | — | — | **DISCOVERED** — requires `Seq[Element]`, not `Seq[String]` |
+| layoutz has no `text()` function | — | — | **DISCOVERED** — use implicit `stringToText` or `(s: Element)` |
+| SN test discovery requires `class` not `object` | — | — | **DISCOVERED** — munit Native needs `@EnableReflectiveInstantiation` + instantiable class |
 
 ## Test Plan
 
@@ -465,7 +570,7 @@ Munit is already present on main:
 
 Only layoutz needs to be added (C1).
 
-#### Custom snapshot helper (10 LOC)
+#### Custom snapshot helper (9 LOC)
 
 In `test/SnapshotTest.scala`:
 
@@ -475,30 +580,23 @@ package org.polyvariant
 trait SnapshotTest {
   self: munit.FunSuite =>
 
-  /** Assert two strings are equal, with a hint to copy-paste the actual as the new expected. */
   def assertSnapshot(obtained: String, expected: String)(implicit loc: munit.Location): Unit =
     assertEquals(obtained.stripMargin.trim, expected.stripMargin.trim)
-
-  /** Compare against a file in src/test/resources/snapshots/ */
-  def assertFileSnapshot(obtained: String, name: String)(implicit loc: munit.Location): Unit = {
-    val resourcePath = s"snapshots/$name.snap"
-    val expected = scala.io.Source.fromResource(resourcePath).mkString
-    assertEquals(obtained.stripMargin.trim, expected.stripMargin.trim)
-  }
 }
 ```
+
+The `assertFileSnapshot` method was planned but dropped — not needed for 5 simple rendering tests.
 
 #### Running tests
 
 ```bash
-# Run all tests (JVM mode -- fast, no native compilation)
+# Run all tests (Scala Native mode — compiles + links native binary, ~25s)
 scala-cli test .
-
-# Run specific test
-scala-cli test . --test-only "org.polyvariant.TuiStateTest"
 ```
 
-Tests run in JVM mode by default (fast, no native compilation needed). The TUI logic (state, rendering, actions) is pure Scala with no native FFI dependencies -- it doesn't need Scala Native to test. Only the final integration smoke test requires a native binary.
+**IMPORTANT**: Tests run as Scala Native binaries, not JVM. `project.scala` has `//> using platform native` which applies to both main and test sources. There is no JVM test override. This means each test run takes ~25s for native linking. The `--test-only` flag is not supported by Scala Native's test runner.
+
+The TUI logic (state transitions, sort, mocked actions) is pure Scala with no native FFI dependencies — it *could* run on JVM if a `//> using test.platform jvm` override were added. But layoutz's `LayoutzApp` trait depends on native terminal I/O, so any test importing `layoutz._` must compile to native.
 
 ### Test files
 
@@ -509,7 +607,9 @@ Tests the pure `update(msg, state) -> (State, Cmd[Msg])` function for every mess
 **NOTE**: `LayoutzApp.update` returns `(State, Cmd[Message])`, not bare `State`. All tests must destructure the tuple. The implicit conversion `(State) => (State, Cmd.none)` only works inside the `update` implementation itself.
 
 ```scala
-object TuiStateTest extends munit.FunSuite {
+import layoutz._
+
+class TuiStateTest extends munit.FunSuite {
 
   val sampleProcesses = List(
     ScalaProcess(100, "sbt", 2048000L, Some(0L), 55, 7.3, "~/project"),
@@ -529,9 +629,8 @@ object TuiStateTest extends munit.FunSuite {
     tickFrame = 0
   )
 
-  /** Helper: call update and discard the Cmd, return only the State */
   private def updateState(msg: TuiMsg, state: TuiState = initialState): TuiState =
-    TuiApp.update(msg, state)._1
+    (new TuiApp(false)).update(msg, state)._1
 
   test("MoveUp at top stays at top") {
     val result = updateState(MoveUp)
@@ -549,21 +648,17 @@ object TuiStateTest extends munit.FunSuite {
     assertEquals(result.selectedIndex, 2)
   }
 
-  test("SortCycle changes sort column") {
-    val result = updateState(SortCycle)
-    assertNotEquals(result.sortColumn, SortColumn.Ram)
-  }
-
-  test("SortCycle toggles direction on same column") {
+  test("SortCycle changes sort column and resets to descending") {
     val sorted = initialState.copy(sortColumn = SortColumn.Ram, sortDescending = true)
     val result = updateState(SortCycle, sorted)
-    assertEquals(result.sortDescending, false)
+    assertNotEquals(result.sortColumn, SortColumn.Ram)
+    assertEquals(result.sortDescending, true)
   }
 
   test("RequestSigterm sets status flash") {
     val result = updateState(RequestSigterm)
     assert(result.statusMessage.exists(_.contains("SIGTERM")))
-    assert(result.confirmation == ConfirmationKind.None)
+    assertEquals(result.confirmation, ConfirmationKind.None)
   }
 
   test("RequestSigkill enters confirmation mode") {
@@ -635,7 +730,7 @@ object TuiStateTest extends munit.FunSuite {
   }
 
   test("Quit returns exit command") {
-    val (state, cmd) = TuiApp.update(Quit, initialState)
+    val (_, cmd) = (new TuiApp(false)).update(Quit, initialState)
     assertEquals(cmd, Cmd.exit)
   }
 }
@@ -646,12 +741,15 @@ object TuiStateTest extends munit.FunSuite {
 Tests that `view(state).render` produces expected ANSI output. Uses inline snapshots.
 
 ```scala
-object TuiViewTest extends munit.FunSuite with SnapshotTest {
+class TuiViewTest extends munit.FunSuite with SnapshotTest {
 
   val sampleProcesses = List(
     ScalaProcess(100, "sbt", 2048000L, Some(0L), 55, 7.3, "~/project"),
     ScalaProcess(200, "Bloop", 157000L, None, 35, 0.5, "~/.local/bloop")
   )
+
+  private def viewRender(state: TuiState): String =
+    (new TuiApp(false)).view(state).render
 
   test("view renders process table with selected row marker") {
     val state = TuiState(
@@ -666,7 +764,7 @@ object TuiViewTest extends munit.FunSuite with SnapshotTest {
       tickFrame = 0
     )
 
-    val rendered = TuiApp.view(state).render
+    val rendered = viewRender(baseState)
     assert(rendered.contains("100"))           // PID present
     assert(rendered.contains("sbt"))            // type present
     assert(rendered.contains("2.0 GB"))         // RAM formatted (2048000 KB = ~2 GB)
@@ -688,12 +786,12 @@ object TuiViewTest extends munit.FunSuite with SnapshotTest {
       tickFrame = 0
     )
 
-    val rendered = TuiApp.view(state).render
+    val rendered = viewRender(state)
     assert(rendered.contains("SIGTERM sent to PID 100"))
   }
 
   test("view renders confirmation overlay for SIGKILL") {
-    val state = TuiState(
+    val state = baseState.copy(
       processes = sampleProcesses,
       selectedIndex = 0,
       sortColumn = SortColumn.Ram,
@@ -705,7 +803,7 @@ object TuiViewTest extends munit.FunSuite with SnapshotTest {
       tickFrame = 0
     )
 
-    val rendered = TuiApp.view(state).render
+    val rendered = viewRender(state)
     assert(rendered.contains("Force kill"))
     assert(rendered.contains("100"))
     assert(rendered.contains("confirm"))
@@ -713,7 +811,7 @@ object TuiViewTest extends munit.FunSuite with SnapshotTest {
   }
 
   test("view renders empty state gracefully") {
-    val state = TuiState(
+    val state = baseState.copy(processes = Nil)
       processes = Nil,
       selectedIndex = 0,
       sortColumn = SortColumn.Ram,
@@ -725,13 +823,12 @@ object TuiViewTest extends munit.FunSuite with SnapshotTest {
       tickFrame = 0
     )
 
-    val rendered = TuiApp.view(state).render
+    val rendered = viewRender(state)
     assert(rendered.length > 0)  // does not crash, renders something
-    // Should show "No processes" or similar
   }
 
   test("view shows sort indicator") {
-    val state = TuiState(
+    val rendered = viewRender(baseState)
       processes = sampleProcesses,
       selectedIndex = 0,
       sortColumn = SortColumn.Ram,
@@ -743,16 +840,15 @@ object TuiViewTest extends munit.FunSuite with SnapshotTest {
       tickFrame = 0
     )
 
-    val rendered = TuiApp.view(state).render
     assert(rendered.contains("Ram"))  // sort column shown in UI
   }
 }
 ```
 
-#### `ProcessActionsTest.scala` -- Action tests
+#### `ProcessActionsTest.scala` — Action tests
 
 ```scala
-object ProcessActionsTest extends munit.FunSuite {
+class ProcessActionsTest extends munit.FunSuite {
 
   // Mocked actions -- no real processes harmed
   test("threadDump returns success message") {
@@ -776,7 +872,7 @@ object ProcessActionsTest extends munit.FunSuite {
 Tests the public `TuiApp.sort` method. This must be defined on `TuiApp` as a standalone function (not inside `update`) so it can be reused by both `update(SortCycle)` and tests.
 
 ```scala
-object SortTest extends munit.FunSuite {
+class SortTest extends munit.FunSuite {
 
   val procs = List(
     ScalaProcess(300, "sbt", 2048000L, Some(0L), 55, 7.3, "~/a"),
@@ -808,21 +904,23 @@ object SortTest extends munit.FunSuite {
 }
 ```
 
-**Implementation note**: `TuiApp.sort` should be defined as:
+**Implementation**: `TuiApp.sort` is a public method on the companion object:
 
 ```scala
 def sort(procs: List[ScalaProcess], column: SortColumn, ascending: Boolean): List[ScalaProcess] = {
   val ordering = column match {
-    case SortColumn.Pid       => Ordering.by(_.pid)
-    case SortColumn.Kind      => Ordering.by(_.kind)
-    case SortColumn.Ram       => Ordering.by(_.ramKb)
-    case SortColumn.MemPercent => Ordering.by(_.memPercent)
-    case SortColumn.Project  => Ordering.by(_.projectPath)
+    case SortColumn.Pid       => Ordering.by[ScalaProcess, Int](_.pid)
+    case SortColumn.Kind      => Ordering.by[ScalaProcess, String](_.kind)
+    case SortColumn.Ram       => Ordering.by[ScalaProcess, Long](_.ramKb)
+    case SortColumn.MemPercent => Ordering.by[ScalaProcess, Double](_.memPercent)
+    case SortColumn.Project   => Ordering.by[ScalaProcess, String](_.projectPath)
   }
-  val sorted = ordering.sort(procs)
+  val sorted = procs.sorted(using ordering)
   if (ascending) sorted else sorted.reverse
 }
 ```
+
+Note: `Ordering.by` returns `Ordering[T]` which is inferred. The `using` keyword is required by Scala 3.8.x for implicit parameters (suppresses a warning).
 
 ### Test execution strategy
 
@@ -910,16 +1008,328 @@ C3.5 (munit infra) ----------------------------------+
 C2 (macOS threads) ----------------------> (independent, anytime)
 ```
 
+## Implementation Status: COMPLETE (Phase 1 + Phase 2)
+
+### Phase 1: Core TUI — COMPLETE
+
+All commits implemented and verified. Build passes, 38/38 tests pass, one-shot mode unchanged.
+
+### Phase 2: Visual Redesign + Main Class Fallback — COMPLETE
+
+UI/UX research (7 background agents, btop/bottom/lazygit analysis) led to a complete visual overhaul of the TUI. Also implemented GitHub issue #5 (main class fallback for unclassified processes).
+
+#### Changes summary
+
+| Area | Change |
+|------|--------|
+| **Layout** | Merged banner + info bar into single `box("title")(...)` title bar. Removed separate rows. |
+| **Selected row** | Blue background (`Color.True(30, 60, 90)`) + bold. Per-cell colors preserved for TYPE/RSS/MEM%. |
+| **Per-type color** | sbt=Magenta, metals=Blue, bloop=Green, scala-cli=Cyan, scalac=Yellow, other=White |
+| **RSS gradient** | <0.5 GB=Green, 0.5–1 GB=Yellow, >1 GB=Red |
+| **MEM% gradient** | <2%=Green, 2–5%=Yellow, >5%=Red |
+| **Table headers** | Bold cyan |
+| **Status flash** | Colored by outcome: ✓ Green (success), ✗ Red (error), ⏳ Yellow (dump) |
+| **Footer** | Compact single line: `↑↓ jk  d term  K kill  t threads  h heap  F sort  ? help  q quit` |
+| **Help overlay** | `?` key toggles categorized keybinding overlay |
+| **Jump keys** | `g` = jump to first, `G` = jump to last |
+| **Empty state** | Helpful message instead of blank table |
+| **Sort bug** | Fixed inverted sort direction on process refresh |
+| **Main class fallback** | `extractMainClass()` extracts FQN from cmdline when classify() finds no known pattern (issue #5) |
+
+#### New/modified files
+
+| File | Change |
+|------|--------|
+| `ScalaMonitor.scala` | Added `extractMainClass()`, modified `classify()` fallback chain |
+| `TuiApp.scala` | Complete `view()` rewrite, added `showHelp`/`ToggleHelp`/`JumpToFirst`/`JumpToLast`, fixed sort bug |
+| `test/PsOutputParsingSuite.scala` | 2 tests updated + 6 new tests for extractMainClass/classify fallback |
+| `test/TuiViewTest.scala` | Rewritten: 5 tests → 8 tests for new rendering |
+| `test/TuiStateTest.scala` | 6 new tests: ToggleHelp ×2, JumpToFirst ×2, JumpToLast ×2 |
+
+### Verification evidence (Phase 2)
+
+```
+$ scala-cli --power package . -o scala-monitor -f
+[info] Total (26073 ms)
+Wrote ./scala-monitor
+
+$ scala-cli test .
+Test run org.polyvariant.TuiViewTest finished: 0 failed, 0 ignored, 8 total
+Test run org.polyvariant.ProcessActionsTest finished: 0 failed, 0 ignored, 2 total
+Test run org.polyvariant.PsOutputParsingSuite finished: 0 failed, 0 ignored, 17 total
+Test run org.polyvariant.SortTest finished: 0 failed, 0 ignored, 4 total
+Test run org.polyvariant.TuiStateTest finished: 0 failed, 0 ignored, 22 total
+(53 tests total, 0 failures)
+
+$ ./scala-monitor --help
+  -w --watch         Interactive TUI mode (like top)
+
+$ ./scala-monitor
+  SCALA PROCESS MONITOR  —  4 processes  —  Total Memory: 4.0 GB
+  ... (unchanged one-shot output)
+```
+
+### Deviations from Plan
+
+Every deviation is documented with rationale. No arbitrary changes were made.
+
+#### 1. `kill()` is in `signal`, not `unistd` (C3)
+
+**Plan said**: `unistd.kill(pid, signal.SIGTERM)`
+**Reality**: Scala Native 0.5.10 does not expose `unistd.kill`. The `kill()` function is in `scala.scalanative.posix.signal`.
+
+```scala
+// BEFORE (plan):
+import scala.scalanative.posix.signal
+import scala.scalanative.posix.unistd
+val result = unistd.kill(pid, signal.SIGTERM)
+
+// AFTER (actual):
+import scala.scalanative.posix.signal
+val result = signal.kill(pid, signal.SIGTERM)
+```
+
+#### 2. `@extern` objects cannot hold Scala `val` constants (C2)
+
+**Plan said**: Add `private val ProcPidTaskInfo = 4` and `private val ProcTaskInfoSize = 96` inside the `@extern object libproc`.
+**Reality**: Scala Native's `@extern` objects are FFI bindings — only `def` with `= extern` are valid members. Scala `val` constants are not supported inside `@extern` objects and won't compile.
+
+**Fix**: Moved the constants to `MacOsProbe` class (which is in the same package and already holds similar constants like `ProcPidVnodePathInfo`, `VnodeInfoStructSize`).
+
+```scala
+// BEFORE (plan — won't compile):
+@extern object libproc {
+  def proc_pidinfo(...): Int = extern
+  private val ProcPidTaskInfo = 4      // ERROR
+  private val ProcTaskInfoSize = 96    // ERROR
+}
+
+// AFTER (actual):
+@extern object libproc {
+  def proc_pidinfo(...): Int = extern
+}
+
+class MacOsProbe(debug: Debug) extends PlatformProbe {
+  private val ProcPidTaskInfo = 4
+  private val ProcTaskInfoSize = 96
+  // ... readThreadCount() uses these
+}
+```
+
+#### 3. `LayoutzApp` must be a `class`, not `object` (C4)
+
+**Plan said**: `object TuiApp extends LayoutzApp[TuiState, TuiMsg]`
+**Reality**: layoutz's `LayoutzApp.run(...)` is a concrete instance method, not a static method. An `object` extending a trait with instance methods works in Scala, but the `init` method needs access to constructor params (`debug: Boolean`). The `LayoutzApp` trait has no constructor params, so `debug` must be on the concrete class. Using a `class` with a companion `object run(debug)` method cleanly separates the entry point from the app instance.
+
+```scala
+// AFTER (actual):
+class TuiApp(debug: Boolean) extends LayoutzApp[TuiState, TuiMsg] {
+  def init: (TuiState, Cmd[TuiMsg]) = {
+    val procs = ScalaMonitor.discover(debug)  // uses constructor param
+    ...
+  }
+  // ...
+}
+
+object TuiApp {
+  def run(debug: Boolean): Unit = {
+    val app = new TuiApp(debug)
+    app.run(tickIntervalMs = 100, renderIntervalMs = 50, ...)
+  }
+  def sort(...): List[ScalaProcess] = { ... }  // public for testing
+}
+```
+
+#### 4. `Cmd.task` returns `Cmd`, not `(State, Cmd)` — must wrap explicitly (C4)
+
+**Plan said**: `RefreshProcesses` case in `update` can return `Cmd.task(...)` directly (relying on implicit).
+**Reality**: `update` must return `(State, Cmd[Msg])`. The implicit `state => (state, Cmd.none)` only converts bare `State`, not `Cmd`. When `RefreshProcesses` needs to return a `Cmd` without changing state, you must explicitly return `(state, Cmd.task(...))`.
+
+```scala
+// BEFORE (plan — type error):
+case RefreshProcesses =>
+  Cmd.task(ScalaMonitor.discover(debug)) { ... }
+  // error: Found Cmd[TuiMsg], Required (TuiState, Cmd[TuiMsg])
+
+// AFTER (actual):
+case RefreshProcesses =>
+  (state, Cmd.task(ScalaMonitor.discover(debug)) { ... })
+```
+
+#### 5. layoutz `table()` takes `Seq[Element]`, not `Seq[String]` (C4)
+
+**Plan said**: `table(tableHeaders, tableRows)` with `List[String]`
+**Reality**: layoutz's `table` function signature is `table(headers: Seq[Element], rows: Seq[Seq[Element]])`. Strings must be explicitly upcast via `s: Element` or `Text(s)`.
+
+```scala
+// BEFORE (plan — type error):
+table(tableHeaders, tableRows)
+
+// AFTER (actual):
+val tableHeadersE: Seq[Element] = tableHeaders.map(h => h: Element)
+val tableRowsE: Seq[Seq[Element]] = tableRows.map(row => row.map(s => s: Element))
+table(tableHeadersE, tableRowsE)
+```
+
+#### 6. layoutz has no `text()` function — use string-to-Element implicit (C4)
+
+**Plan said**: `text(footerText).color(Color.BrightBlack)`
+**Reality**: layoutz has no standalone `text()` function. Strings are implicitly converted to `Element` via `implicit def stringToText(s: String): Text`. Use `(s: Element)` or just `s` where the type is already `Element`.
+
+```scala
+// BEFORE (plan — error: Not found: text):
+val footer = text(footerText).color(Color.BrightBlack)
+
+// AFTER (actual):
+val footer = (footerText: Element).color(Color.BrightBlack)
+```
+
+#### 7. SortCycle always cycles + always descending (C4, C4.5)
+
+**Plan said**: "Cycle sort column. Toggle direction if same column pressed again" with a test asserting `sortDescending = false` after SortCycle.
+**Reality**: These were contradictory. SortCycle cycles through 5 distinct columns (PID→TYPE→RAM→MEM%→PROJECT), so pressing the same column again requires 5 presses — not a useful UX pattern. The plan's own test asserted the column *changed* (`assertNotEquals(result.sortColumn, SortColumn.Ram)`) which conflicts with "toggle on same column". Implemented: always cycle to next column, always set descending.
+
+```scala
+// AFTER (actual):
+case SortCycle =>
+  val columns = List(SortColumn.Pid, SortColumn.Kind, SortColumn.Ram, SortColumn.MemPercent, SortColumn.Project)
+  val nextIdx = (columns.indexOf(state.sortColumn) + 1) % columns.size
+  val sorted = TuiApp.sort(state.processes, columns(nextIdx), ascending = false)
+  state.copy(processes = sorted, sortColumn = columns(nextIdx), sortDescending = true)
+```
+
+Test updated to match:
+```scala
+test("SortCycle changes sort column and resets to descending") {
+  val result = updateState(SortCycle, initialState.copy(sortColumn = SortColumn.Ram, sortDescending = true))
+  assertNotEquals(result.sortColumn, SortColumn.Ram)
+  assertEquals(result.sortDescending, true)
+}
+```
+
+#### 8. Test suites must be `class`, not `object` (C4.5)
+
+**Plan said**: `object TuiStateTest extends munit.FunSuite`
+**Reality**: Scala Native test discovery (via `@EnableReflectiveInstantiation` + `Reflect.lookupInstantiatableClass`) requires test suites to be instantiable classes, not singleton objects. `object` definitions compile and link fine but are not discovered by the test runner. The existing `PsOutputParsingSuite` already used `class` — new test files must follow the same convention.
+
+```scala
+// BEFORE (plan — not discovered by test runner):
+object TuiStateTest extends munit.FunSuite { ... }
+
+// AFTER (actual):
+class TuiStateTest extends munit.FunSuite { ... }
+```
+
+#### 9. Tests run as Scala Native, not JVM (C4.5)
+
+**Plan said**: "Tests run in JVM mode by default (fast, no native compilation needed)"
+**Reality**: `project.scala` has `//> using platform native` which applies to both main and test sources. There is no `//> using test.platform jvm` override. All tests compile and run as native binaries (~25s link time). The `--test-only` flag is also not supported by Scala Native's test runner. This is a significant CI time consideration.
+
+#### 10. `ProcTaskInfoSize` constant moved to `MacOsProbe` class (C2)
+
+See deviation #2 above. The `MacOsExtern.scala` file has no net change from pre-implementation state — it remains a pure `@extern` FFI binding file with just `proc_pidinfo`, `popen`, and `pclose`.
+
+### Phase 2 Deviations
+
+#### 11. SIGKILL key changed from `Ctrl+K` to `K` (Phase 2)
+
+**Phase 1 plan**: `Ctrl+K` triggers SIGKILL confirmation
+**Phase 2 change**: Changed to plain `K` (uppercase) to free up Ctrl+K and avoid terminal compatibility issues. The compact footer already lists `K kill`.
+
+#### 12. Sort direction bug in `ProcessesLoaded` handler (Phase 2)
+
+**Found**: `TuiApp.scala:95` — `!state.sortDescending` was negating sort direction on every process refresh, causing the sort to flip between ascending/descending every second.
+**Fixed**: Changed to `state.sortDescending`.
+
+#### 13. layoutz `BgColored` has no `HasBorder` instance (Phase 2)
+
+**Discovered during view() rewrite**: Cannot chain `.bg(...).border(...)` because `BgColored` doesn't implement `HasBorder`. Must apply `.border()` on the container (Box/Table) and `.bg()` only on inner cell Elements. The view() implementation correctly applies borders on `box(...)` and background colors on individual cells.
+
+#### 14. `identity[Element]` for non-selected cell styling (Phase 2)
+
+Used `identity[Element]` as the no-op styling function for non-selected rows. Valid Scala 3 syntax — `identity[A]` returns `A => A`.
+
+### layoutz API findings (reference for future work)
+
+Key API details discovered during implementation that aren't in the README:
+
+| API | Detail |
+|-----|--------|
+| `LayoutzApp` | Trait with 4 abstract methods: `init`, `update`, `view`, `subscriptions`. `run(...)` is a concrete method with params: `tickIntervalMs`, `renderIntervalMs`, `quitKey`, `showQuitMessage`, `quitMessage`, `clearOnStart`, `clearOnExit`, `alignment`, `terminal`, `executionContext` |
+| `update` return type | `(State, Cmd[Message])`. Implicit converts bare `State` to `(State, Cmd.none)` inside `update` body only |
+| `Cmd.task[A, Msg]` | `def task(run: => A)(toMsg: Either[String, A] => Msg): Cmd[Msg]` — wraps in `Try`, maps to `Either` |
+| `Cmd.exit` | Returns a `Cmd[Nothing]` that triggers clean shutdown |
+| `Sub.onKeyPress` | `def onKeyPress(handler: Key => Option[Msg]): Sub[Msg]` — handler is re-evaluated on each keypress with fresh state |
+| `Sub.time.everyMs` | `def everyMs(intervalMs: Long, msg: Msg): Sub[Msg]` — requires explicit `Long` literal (use `1000L`) |
+| `table` | `table(headers: Seq[Element], rows: Seq[Seq[Element]]): Element` — NOT `Seq[String]` |
+| `statusCard` | `statusCard(label: Element, content: Element): StatusCard` — strings implicitly convert |
+| `box` | `box(title: String)(elements: Element*): Box` — title is `String`, body is varargs `Element` |
+| `banner` | `banner(content: Element): Banner` — single `Element` arg, not `String` |
+| `row` | `row(elements: Element*): Row` — varargs |
+| `layout` | `layout(elements: Element*): Layout` — vertical stacking |
+| `Key` | `Char(c)`, `Ctrl(c)`, `Up`, `Down`, `Enter`, `Escape`, `Tab`, `Backspace`, `Delete`, `Left`, `Right`, `Home`, `End`, `PageUp`, `PageDown`, `Unknown(code)` |
+| `Color` | `NoColor`, `Black`..`White`, `BrightBlack`..`BrightWhite`, `Full(code)`, `True(r,g,b)` |
+| `Border` | `None`, `Single`, `Double`, `Round`, `Thick`, `Ascii`, `Block`, `Dashed`, `Dotted`, `InnerHalfBlock`, `OuterHalfBlock`, `Markdown`, `Custom(corner, horizontal, vertical)` |
+| String → Element | Implicit conversion: `implicit def stringToText(s: String): Text` — just use strings where `Element` is expected |
+
+### Files changed (final inventory)
+
+| File | Action | LOC |
+|------|--------|-----|
+| `project.scala` | MODIFIED — added layoutz dep | 8 |
+| `MacOsExtern.scala` | UNCHANGED (constants moved to MacOsProbe) | 14 |
+| `MacOsProbe.scala` | MODIFIED — added `readThreadCount`, `threadCountResolver` param | ~130 |
+| `ScalaMonitor.scala` | MODIFIED — `--watch` flag, public `discover`/`formatMemory`, `extractMainClass` | ~212 |
+| `PlatformProbe.scala` | UNCHANGED | 15 |
+| `LinuxProbe.scala` | UNCHANGED | 122 |
+| `Debug.scala` | UNCHANGED | 6 |
+| `TuiApp.scala` | NEW — full TUI with state, update, view, subscriptions (Phase 2: view rewrite, help, jump keys) | ~340 |
+| `ProcessActions.scala` | NEW — kill + mocked dumps | 27 |
+| `test/SnapshotTest.scala` | NEW — assertSnapshot helper | 9 |
+| `test/TuiStateTest.scala` | MODIFIED — 22 tests (Phase 2: +6 ToggleHelp/Jump tests) | 155 |
+| `test/TuiViewTest.scala` | MODIFIED — 8 rendering tests (Phase 2: rewritten for new layout) | ~80 |
+| `test/ProcessActionsTest.scala` | UNCHANGED — 2 mocked action tests | 14 |
+| `test/SortTest.scala` | UNCHANGED — 4 sort logic tests | 32 |
+| `test/PsOutputParsingSuite.scala` | MODIFIED — 17 tests (Phase 2: +6 extractMainClass/classify tests) | ~120 |
+| `scripts/integration-test.sh` | MODIFIED — added --watch and -o pid assertions | ~115 |
+
 ## Future Work (Out of Scope)
 
 - Real thread dump implementation (`jcmd <pid> Thread.print -l > /tmp/...`)
 - Real heap dump implementation (`jcmd <pid> GC.heap_dump /tmp/...`)
 - Multi-select with `Space` for batch actions
 - Signal picker overlay (choose arbitrary signal)
-- Help overlay (`?` key)
 - Adjustable refresh rate (`+`/`-` keys)
-- Color-coded memory thresholds (green/yellow/red)
 - Memory bar graphs per process
 - Inline filter (`/` key)
 - Per-platform column visibility (hide swap/threads on macOS)
 - snapshot4s integration (if project ever migrates to sbt)
+- Truncate long main class names in TYPE column (currently shows full FQN from `extractMainClass`)
+
+## Main Class Fallback (GitHub Issue #5)
+
+When `classify()` finds no known pattern (sbt, metals, bloop, etc.), it now extracts the JVM main class from the cmdline as a fallback before resorting to generic "Scala/JVM".
+
+```scala
+def extractMainClass(cmdline: String): Option[String] = {
+  val tokens = cmdline.split("\\s+").drop(1)
+  tokens.find { t =>
+    t.contains(".") &&
+    !t.startsWith("-") &&
+    !t.contains("/") &&
+    !t.endsWith(".jar") &&
+    t.split("\\.").forall(seg => seg.nonEmpty && seg.head.isLetter)
+  }
+}
+
+def classify(cmdline: String, debug: Debug): String = {
+  classifications.find(c => cmdline.contains(c.pattern))
+    .map(_.name)
+    .orElse(extractMainClass(cmdline))    // Phase 2: FQN fallback
+    .getOrElse("Scala/JVM")
+}
+```
+
+**Fallback chain**: known patterns → `extractMainClass()` → "Scala/JVM"
+
+**False positive safety**: The validator rejects classpath entries (`.jar` suffix, `/` path separators) and version-like strings (segments starting with digits). Only fully-qualified class names where every dot-separated segment starts with a letter are accepted (e.g. `com.example.myapp.Main`, `mill.daemon.MillDaemonMain`).

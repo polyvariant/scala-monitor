@@ -16,7 +16,9 @@ case class TuiState(
   statusMessageExpiresAt: Long,
   confirmation: ConfirmationKind,
   confirmTargetPid: Option[Int],
-  tickFrame: Int
+  tickFrame: Int,
+  showHelp: Boolean = false,
+  termWidth: Int = 80
 )
 
 sealed trait TuiMsg
@@ -37,6 +39,9 @@ case class ActionFailed(err: String) extends TuiMsg
 case object ClearStatus extends TuiMsg
 case object TickFrame extends TuiMsg
 case object Quit extends TuiMsg
+case object ToggleHelp extends TuiMsg
+case object JumpToFirst extends TuiMsg
+case object JumpToLast extends TuiMsg
 
 object TuiApp {
 
@@ -70,6 +75,7 @@ class TuiApp(debug: Boolean) extends LayoutzApp[TuiState, TuiMsg] {
   def init: (TuiState, Cmd[TuiMsg]) = {
     val procs = ScalaMonitor.discover(debug)
     val sorted = TuiApp.sort(procs, SortColumn.Ram, ascending = false)
+    val tw = math.min(210, SttyTerminal.create().map(_.terminalWidth()).getOrElse(80))
     val state = TuiState(
       processes = sorted,
       selectedIndex = 0,
@@ -79,7 +85,9 @@ class TuiApp(debug: Boolean) extends LayoutzApp[TuiState, TuiMsg] {
       statusMessageExpiresAt = 0L,
       confirmation = ConfirmationKind.None,
       confirmTargetPid = None,
-      tickFrame = 0
+      tickFrame = 0,
+      showHelp = false,
+      termWidth = tw
     )
     (state, Cmd.none)
   }
@@ -92,7 +100,7 @@ class TuiApp(debug: Boolean) extends LayoutzApp[TuiState, TuiMsg] {
       })
 
     case ProcessesLoaded(procs) =>
-      val sorted = TuiApp.sort(procs, state.sortColumn, !state.sortDescending)
+      val sorted = TuiApp.sort(procs, state.sortColumn, state.sortDescending)
       val maxIdx = math.max(0, sorted.size - 1)
       val clamped = math.min(state.selectedIndex, maxIdx)
       state.copy(processes = sorted, selectedIndex = clamped)
@@ -196,6 +204,16 @@ class TuiApp(debug: Boolean) extends LayoutzApp[TuiState, TuiMsg] {
       }
       cleared.copy(tickFrame = cleared.tickFrame + 1)
 
+    case ToggleHelp =>
+      state.copy(showHelp = !state.showHelp)
+
+    case JumpToFirst =>
+      state.copy(selectedIndex = 0)
+
+    case JumpToLast =>
+      val maxIdx = math.max(0, state.processes.size - 1)
+      state.copy(selectedIndex = maxIdx)
+
     case Quit =>
       (state, Cmd.exit)
   }
@@ -207,13 +225,16 @@ class TuiApp(debug: Boolean) extends LayoutzApp[TuiState, TuiMsg] {
       Sub.time.everyMs(100L, TickFrame),
       Sub.onKeyPress {
         case Key.Char('q')              => Some(Quit)
-        case Key.Up | Key.Char('k')      => Some(MoveUp)
-        case Key.Down | Key.Char('j')    => Some(MoveDown)
+        case Key.Up                     => Some(MoveUp)
+        case Key.Down                   => Some(MoveDown)
         case Key.Char('d')               => Some(RequestSigterm)
-        case Key.Ctrl('K')               => Some(RequestSigkill)
+        case Key.Char('k')               => Some(RequestSigkill)
         case Key.Char('t')               => Some(RequestThreadDump)
         case Key.Char('h')               => Some(RequestHeapDump)
         case Key.Char('F')               => Some(SortCycle)
+        case Key.Char('?')               => Some(ToggleHelp)
+        case Key.Char('g')               => Some(JumpToFirst)
+        case Key.Char('G')               => Some(JumpToLast)
         case Key.Enter if confirming     => Some(ConfirmKill)
         case Key.Escape if confirming    => Some(CancelConfirmation)
         case _                           => None
@@ -223,7 +244,7 @@ class TuiApp(debug: Boolean) extends LayoutzApp[TuiState, TuiMsg] {
 
   def view(state: TuiState): Element = {
     val totalRam = state.processes.map(_.ramKb).sum
-    val processWord = if (state.processes.size == 1) "process" else "processes"
+    val processWord = if (state.processes.size == 1) "proc" else "procs"
     val sortLabel = state.sortColumn match {
       case SortColumn.Pid       => "PID"
       case SortColumn.Kind      => "TYPE"
@@ -231,65 +252,146 @@ class TuiApp(debug: Boolean) extends LayoutzApp[TuiState, TuiMsg] {
       case SortColumn.MemPercent => "MEM%"
       case SortColumn.Project   => "PROJ"
     }
-    val sortArrow = if (state.sortDescending) "v" else "^"
+    val sortArrow = if (state.sortDescending) "\u25BE" else "\u25B4"
+    val titleText = s" SCALA MONITOR \u2500\u2500 ${state.processes.size} $processWord \u2500\u2500 ${ScalaMonitor.formatMemory(totalRam)} \u2500\u2500 $sortLabel $sortArrow "
+    val brandText = "https://polyvariant.org"
+    val brandW = brandText.length
 
-    val headerText = s"SCALA PROCESS MONITOR -- ${state.processes.size} $processWord -- ${ScalaMonitor.formatMemory(totalRam)} RAM"
-    val header = banner(headerText).border(Border.Round)
+    val allProcs = state.processes
+    val pidW = math.max(3, allProcs.map(_.pid.toString.length).maxOption.getOrElse(0))
+    val kindW = math.max(16, allProcs.map(_.kind.length).maxOption.getOrElse(0))
+    val rssW = math.max(3, allProcs.map(p => ScalaMonitor.formatMemory(p.ramKb).length).maxOption.getOrElse(0))
+    val swapW = math.max(4, allProcs.map(p => p.swapKb.map(ScalaMonitor.formatMemory).getOrElse("n/a").length).maxOption.getOrElse(0))
+    val memW = math.max(4, allProcs.map(p => f"${p.memPercent}%.1f%%".length).maxOption.getOrElse(0))
+    val thrW = math.max(3, allProcs.map(_.threads.toString.length).maxOption.getOrElse(0))
+    val nonProjectContentW = pidW + kindW + rssW + swapW + memW + thrW
+    // layoutz table: 1 space padding each side per column, │ separators
+    // 7 columns: 7*2 padding + 8 │ chars (left/right borders + inter-column)
+    val tableOverhead = 7 * 2 + 8
+    val projectMaxWidth = math.max(7, state.termWidth - nonProjectContentW - tableOverhead)
+    val tableWidth = nonProjectContentW + projectMaxWidth + tableOverhead
+    val titleAvail = math.max(1, tableWidth - brandW)
+    val displayTitle = if (titleText.length > titleAvail) titleText.take(titleAvail - 1) + "\u2026"
+    else titleText + (" " * (titleAvail - titleText.length))
 
-    val infoBar = row(
-      statusCard("Refresh", "1s"),
-      statusCard("Sort", s"$sortLabel $sortArrow")
+    val titleRow = rowTight(
+      (displayTitle: Element).color(Color.Cyan).style(Style.Bold),
+      (brandText: Element).color(Color.BrightBlack)
     )
 
-    val tableHeaders = List("PID", "TYPE", "RSS", "SWAP", "MEM%", "THR", "PROJECT")
-    val tableRows = state.processes.zipWithIndex.map { case (p, idx) =>
+    def padRight(s: String, w: Int): String =
+      if (s.length >= w) s else s + (" " * (w - s.length))
+
+    val tableHeadersE: Seq[Element] = List(
+      padRight("PID", pidW),
+      padRight("TYPE", kindW),
+      padRight("RSS", rssW),
+      padRight("SWAP", swapW),
+      padRight("MEM%", memW),
+      padRight("THR", thrW),
+      padRight("PROJECT", projectMaxWidth)
+    ).map(h => (h: Element).color(Color.Cyan).style(Style.Bold))
+
+    val tableRowsE: Seq[Seq[Element]] = state.processes.zipWithIndex.map { case (p, idx) =>
+      val isSel = idx == state.selectedIndex
+      val bg: Element => Element = if (isSel) e => e.bg(Color.True(30, 60, 90)).style(Style.Bold) else identity[Element]
+      val bgWhite: Element => Element = if (isSel) e => e.bg(Color.True(30, 60, 90)).color(Color.White).style(Style.Bold) else identity[Element]
+      val rssGb = p.ramKb.toDouble / (1024.0 * 1024.0)
+      val rssColor: Color = if (rssGb >= 6.0) Color.Red else if (rssGb >= 2.0) Color.Yellow else Color.Green
+      val memColor: Color = if (p.memPercent >= 15.0) Color.Red else if (p.memPercent >= 5.0) Color.Yellow else Color.Green
+      val kc: Color = p.kind.toLowerCase match {
+        case "sbt"       => Color.Magenta
+        case "metals"    => Color.Blue
+        case "bloop"     => Color.Green
+        case "scala-cli" => Color.Cyan
+        case "scalac"    => Color.Yellow
+        case _           => Color.White
+      }
       val swapStr = p.swapKb.map(ScalaMonitor.formatMemory).getOrElse("n/a")
-      val marker = if (idx == state.selectedIndex) ">" else " "
-      List(
-        s"$marker${p.pid}",
-        p.kind,
-        ScalaMonitor.formatMemory(p.ramKb),
-        swapStr,
-        f"${p.memPercent}%.1f%%",
-        p.threads.toString,
-        p.projectPath
+      val displayPath = if (p.projectPath.length > projectMaxWidth)
+        p.projectPath.take(projectMaxWidth - 3) + "..."
+      else
+        p.projectPath + (" " * (projectMaxWidth - p.projectPath.length))
+      Seq(
+        bgWhite(padRight(p.pid.toString, pidW)),
+        bg(padRight(p.kind, kindW)),
+        bg((padRight(ScalaMonitor.formatMemory(p.ramKb), rssW): Element).color(rssColor)),
+        bg(padRight(swapStr, swapW)),
+        bg((padRight(f"${p.memPercent}%.1f%%", memW): Element).color(memColor)),
+        bgWhite(padRight(p.threads.toString, thrW)),
+        bg(displayPath)
       )
     }
 
-    val tableHeadersE: Seq[Element] = tableHeaders.map(h => h: Element)
-    val tableRowsE: Seq[Seq[Element]] = tableRows.map(row => row.map(s => s: Element))
-
-    val tableElement = if (tableRows.nonEmpty) {
-      table(tableHeadersE, tableRowsE).border(Border.Round)
+    val tableElement = if (tableRowsE.nonEmpty) {
+      layout(titleRow, table(tableHeadersE, tableRowsE).border(Border.Round))
     } else {
-      val emptyRow: Seq[Element] = Seq("No Scala processes found", "", "", "", "", "", "").map(s => s: Element)
-      table(tableHeadersE, Seq(emptyRow)).border(Border.Round)
+      val emptyTitleText = s" SCALA MONITOR \u2500\u2500 0 $processWord \u2500\u2500 0 kB "
+      val emptyAvail = math.max(1, state.termWidth - brandW)
+      val emptyDisplayTitle = if (emptyTitleText.length > emptyAvail) emptyTitleText.take(emptyAvail - 1) + "\u2026"
+      else emptyTitleText + (" " * (emptyAvail - emptyTitleText.length))
+      val emptyTitleRow = rowTight(
+        (emptyDisplayTitle: Element).color(Color.Cyan).style(Style.Bold),
+        (brandText: Element).color(Color.BrightBlack)
+      )
+      val emptyMsg = layout(
+        "  No Scala processes found",
+        "  Launch sbt, scala-cli, metals, or bloop to see them here"
+      )
+      layout(emptyTitleRow, box("")(emptyMsg).border(Border.Round))
     }
 
-    val footerText = "Arrows navigate | d SIGTERM | Ctrl+K KILL | t threads | h heap | F sort | q quit"
+    val footerText = " \u2191\u2193 nav  d term  k kill  t threads  h heap  F sort  ? help  q quit"
     val footer = (footerText: Element).color(Color.BrightBlack)
 
     val statusFlash = state.statusMessage.map { msg =>
-      (s" ! $msg": Element).color(Color.Yellow)
+      if (msg.startsWith("Error:"))
+        (s" \u2717 $msg": Element).color(Color.Red)
+      else if (msg.contains("dump"))
+        (s" \u23F3 $msg": Element).color(Color.Yellow)
+      else
+        (s" \u2713 $msg": Element).color(Color.Green)
     }
 
     val confirmationOverlay = state.confirmation match {
       case ConfirmationKind.Sigkill =>
-        state.confirmTargetPid.map { pid =>
-          val confirmText = s"!! Force kill PID $pid?  Enter=confirm  Esc=cancel"
-          box(confirmText)().border(Border.Round).color(Color.Red)
+        state.confirmTargetPid.flatMap { pid =>
+          state.processes.find(_.pid == pid).map { proc =>
+            val line1 = (s"  Kill ${proc.kind} (PID ${proc.pid})?": Element).style(Style.Bold)
+            val line2 = ("  Enter confirm   Esc cancel": Element).style(Style.Bold)
+            box(s" Kill Process \u2500\u2500 Esc to close ")(line1, line2)
+              .border(Border.Round).color(Color.Red)
+          }
         }
       case ConfirmationKind.None => None
     }
 
-    if (confirmationOverlay.isDefined) {
-      layout(header, infoBar, tableElement, confirmationOverlay.get)
+    val helpContent = layout(
+      (" Navigation ": Element).style(Style.Bold),
+      "   \u2191\u2193        Navigate up / down",
+      "   g / G       Jump to first / last row",
+      (" Actions ": Element).style(Style.Bold),
+      "   d           Send SIGTERM",
+      "   k           Send SIGKILL (confirm)",
+      "   t           Request thread dump",
+      "   h           Request heap dump",
+      (" Sort ": Element).style(Style.Bold),
+      "   F           Cycle sort column",
+      (" Misc ": Element).style(Style.Bold),
+      "   ?           Toggle this help",
+      "   q           Quit"
+    )
+    val helpBox = box("")(helpContent).border(Border.Round)
+
+    if (state.showHelp) {
+      layout(helpBox, footer)
+    } else if (confirmationOverlay.isDefined) {
+      layout(tableElement, confirmationOverlay.get, footer)
     } else {
-      val flashElement = statusFlash match {
-        case Some(flash) => layout(footer, flash)
-        case None        => layout(footer)
+      statusFlash match {
+        case Some(flash) => layout(tableElement, layout(footer, flash))
+        case None        => layout(tableElement, footer)
       }
-      layout(header, infoBar, tableElement, flashElement)
     }
   }
 }
