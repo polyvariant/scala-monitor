@@ -95,7 +95,10 @@ object ScalaMonitor {
   def extractMainClass(cmdline: String): Option[String] = {
     // cmdline comes from NUL-separated /proc/cmdline (joined with spaces) or ps args=;
     // Java binary paths and classpath entries do not contain spaces in practice.
-    val args = cmdline.split(" ").toList
+    val trimmed = cmdline.trim
+    val args =
+      if (trimmed.isEmpty) Nil
+      else trimmed.split("\\s+").toList
     val javaIndex = args.indexWhere(a => a == "java" || a.endsWith("/java"))
     if (javaIndex < 0) None
     else {
