@@ -95,10 +95,10 @@ else
   PASS=false
 fi
 
-if "$MONITOR" --help | grep -q "watch"; then
-  echo "  PASS: --help contains watch"
+if "$MONITOR" --help | grep -q "tui"; then
+  echo "  PASS: --help contains tui"
 else
-  echo "  FAIL: --help missing watch"
+  echo "  FAIL: --help missing tui"
   PASS=false
 fi
 
