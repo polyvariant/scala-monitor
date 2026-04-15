@@ -58,7 +58,8 @@ object TuiApp {
   }
 
   def run(debug: Boolean): Unit = {
-    val app = new TuiApp(debug)
+    val processActions = ProcessActionsLive(scala.scalanative.posix.signal)
+    val app = new TuiApp(debug, processActions)
     app.run(
       tickIntervalMs = 100,
       renderIntervalMs = 50,
@@ -70,7 +71,7 @@ object TuiApp {
   }
 }
 
-class TuiApp(debug: Boolean) extends LayoutzApp[TuiState, TuiMsg] {
+class TuiApp(debug: Boolean, processActions: ProcessActions) extends LayoutzApp[TuiState, TuiMsg] {
 
   def init: (TuiState, Cmd[TuiMsg]) = {
     val procs = ScalaMonitor.discover(debug)
@@ -123,7 +124,7 @@ class TuiApp(debug: Boolean) extends LayoutzApp[TuiState, TuiMsg] {
     case RequestSigterm =>
       state.processes.lift(state.selectedIndex) match {
         case Some(proc) =>
-          val result = ProcessActions.sendSigterm(proc.pid)
+          val result = processActions.sendSigterm(proc.pid)
           result match {
             case Right(msg) => state.copy(statusMessage = Some(msg), statusMessageExpiresAt = System.currentTimeMillis() + 3000)
             case Left(err)  => state.copy(statusMessage = Some("Error: " + err), statusMessageExpiresAt = System.currentTimeMillis() + 5000)
@@ -141,7 +142,7 @@ class TuiApp(debug: Boolean) extends LayoutzApp[TuiState, TuiMsg] {
     case ConfirmKill =>
       state.confirmTargetPid match {
         case Some(pid) =>
-          val result = ProcessActions.sendSigkill(pid)
+          val result = processActions.sendSigkill(pid)
           result match {
             case Right(msg) =>
               state.copy(
@@ -167,7 +168,7 @@ class TuiApp(debug: Boolean) extends LayoutzApp[TuiState, TuiMsg] {
     case RequestThreadDump =>
       state.processes.lift(state.selectedIndex) match {
         case Some(proc) =>
-          val result = ProcessActions.threadDump(proc.pid)
+          val result = processActions.threadDump(proc.pid)
           result match {
             case Right(msg) => state.copy(statusMessage = Some(msg), statusMessageExpiresAt = System.currentTimeMillis() + 3000)
             case Left(err)  => state.copy(statusMessage = Some("Error: " + err), statusMessageExpiresAt = System.currentTimeMillis() + 5000)
@@ -178,7 +179,7 @@ class TuiApp(debug: Boolean) extends LayoutzApp[TuiState, TuiMsg] {
     case RequestHeapDump =>
       state.processes.lift(state.selectedIndex) match {
         case Some(proc) =>
-          val result = ProcessActions.heapDump(proc.pid)
+          val result = processActions.heapDump(proc.pid)
           result match {
             case Right(msg) => state.copy(statusMessage = Some(msg), statusMessageExpiresAt = System.currentTimeMillis() + 3000)
             case Left(err)  => state.copy(statusMessage = Some("Error: " + err), statusMessageExpiresAt = System.currentTimeMillis() + 5000)

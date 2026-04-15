@@ -1,26 +1,36 @@
 package org.polyvariant
 
-import scala.scalanative.posix.signal
+import scala.scalanative.posix.{signal => PosixSignal}
 
-object ProcessActions {
+trait ProcessActions {
+  def sendSigterm(pid: Int): Either[ProcessActionFailed, String]
+  def sendSigkill(pid: Int): Either[ProcessActionFailed, String]
+  def threadDump(pid: Int): Either[ProcessActionFailed, String] 
+  def heapDump(pid: Int): Either[ProcessActionFailed, String]
+}
 
-  def sendSigterm(pid: Int): Either[String, String] = {
+class ProcessActionsLive(signal: PosixSignal) extends ProcessActions {
+
+  def sendSigterm(pid: Int): Either[ProcessActionFailed, String] = {
     val result = signal.kill(pid, signal.SIGTERM)
     if (result == 0) Right(s"SIGTERM sent to PID $pid")
-    else Left(s"kill($pid, SIGTERM) failed")
+    else Left(ProcessActionFailed(s"kill($pid, SIGTERM) failed"))
   }
 
-  def sendSigkill(pid: Int): Either[String, String] = {
+  def sendSigkill(pid: Int): Either[ProcessActionFailed, String] = {
     val result = signal.kill(pid, signal.SIGKILL)
     if (result == 0) Right(s"SIGKILL sent to PID $pid")
-    else Left(s"kill($pid, SIGKILL) failed")
+    else Left(ProcessActionFailed(s"kill($pid, SIGKILL) failed"))
   }
 
-  def threadDump(pid: Int): Either[String, String] = {
+  def threadDump(pid: Int): Either[ProcessActionFailed, String] = {
     Right(s"Thread dump requested for PID $pid -> /tmp/threads-$pid.hprof")
   }
 
-  def heapDump(pid: Int): Either[String, String] = {
+  def heapDump(pid: Int): Either[ProcessActionFailed, String] = {
     Right(s"Heap dump requested for PID $pid -> /tmp/heap-$pid.hprof")
   }
+
 }
+
+final case class ProcessActionFailed(msg: String) extends RuntimeException(msg)

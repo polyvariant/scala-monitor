@@ -22,7 +22,7 @@ class TuiViewTest extends munit.FunSuite with SnapshotTest {
   )
 
   private def viewRender(state: TuiState): String =
-    (new TuiApp(false)).view(state).render
+    (new TuiApp(false, ProcessActionsStub)).view(state).render
 
   test("view renders process table with data") {
     val rendered = viewRender(baseState)
