@@ -2,6 +2,19 @@ package org.polyvariant
 
 import layoutz._
 import layoutz.Color
+import layoutz.Key.Ctrl
+import layoutz.Key.Unknown
+import layoutz.Key.Enter
+import layoutz.Key.Escape
+import layoutz.Key.Tab
+import layoutz.Key.Backspace
+import layoutz.Key.Delete
+import layoutz.Key.Up
+import layoutz.Key.Down
+import layoutz.Key.Home
+import layoutz.Key.End
+import layoutz.Key.PageUp
+import layoutz.Key.PageDown
 
 enum SortColumn { case Pid, Kind, Ram, MemPercent, Project }
 
@@ -224,21 +237,25 @@ class TuiApp(debug: Boolean, processActions: ProcessActions) extends LayoutzApp[
     Sub.batch(
       Sub.time.everyMs(1000L, RefreshProcesses),
       Sub.time.everyMs(100L, TickFrame),
-      Sub.onKeyPress {
-        case Key.Char('q')              => Some(Quit)
-        case Key.Up                     => Some(MoveUp)
-        case Key.Down                   => Some(MoveDown)
-        case Key.Char('d')               => Some(RequestSigterm)
-        case Key.Char('k')               => Some(RequestSigkill)
-        case Key.Char('t')               => Some(RequestThreadDump)
-        case Key.Char('h')               => Some(RequestHeapDump)
-        case Key.Char('F')               => Some(SortCycle)
-        case Key.Char('?')               => Some(ToggleHelp)
-        case Key.Char('g')               => Some(JumpToFirst)
-        case Key.Char('G')               => Some(JumpToLast)
-        case Key.Enter if confirming     => Some(ConfirmKill)
-        case Key.Escape if confirming    => Some(CancelConfirmation)
-        case _                           => None
+      Sub.onKeyPress { key =>
+        if(confirming) key match {
+          case Key.Enter if confirming     => Some(ConfirmKill)
+          case Key.Escape if confirming    => Some(CancelConfirmation)
+          case _ => None
+        } else key match {
+          case Key.Char('q')              => Some(Quit)
+          case Key.Up                     => Some(MoveUp)
+          case Key.Down                   => Some(MoveDown)
+          case Key.Char('d')               => Some(RequestSigterm)
+          case Key.Char('k')               => Some(RequestSigkill)
+          case Key.Char('t')               => Some(RequestThreadDump)
+          case Key.Char('h')               => Some(RequestHeapDump)
+          case Key.Char('F')               => Some(SortCycle)
+          case Key.Char('?')               => Some(ToggleHelp)
+          case Key.Char('g')               => Some(JumpToFirst)
+          case Key.Char('G')               => Some(JumpToLast)
+          case _                           => None
+        }
       }
     )
   }
