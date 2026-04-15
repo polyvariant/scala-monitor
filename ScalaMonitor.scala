@@ -86,9 +86,33 @@ object ScalaMonitor {
     val result = classifications
       .find(c => cmdline.contains(c.pattern))
       .map(_.name)
+      .orElse(extractMainClass(cmdline))
       .getOrElse("Scala/JVM")
     debug.log(s"  classify('$cmdline') → '$result'")
     result
+  }
+
+  def extractMainClass(cmdline: String): Option[String] = {
+    val args = cmdline.split(" ").toList
+    val javaIndex = args.indexWhere { a =>
+      val name = a.lastIndexOf('/') match {
+        case -1 => a
+        case i  => a.substring(i + 1)
+      }
+      name == "java"
+    }
+    if (javaIndex < 0) None
+    else {
+      val afterJava = args.drop(javaIndex + 1)
+      def find(remaining: List[String]): Option[String] = remaining match {
+        case Nil => None
+        case head :: tail =>
+          if (head == "-cp" || head == "-classpath" || head == "--class-path") find(tail.drop(1))
+          else if (head.startsWith("-")) find(tail)
+          else Some(head)
+      }
+      find(afterJava)
+    }
   }
 
   def isScalaProcess(cmdline: String, debug: Debug): Boolean = {

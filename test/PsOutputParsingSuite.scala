@@ -19,13 +19,13 @@ class PsOutputParsingSuite extends munit.FunSuite {
     assertEquals(bloop.get.ramKb, 184288L)
   }
 
-  test("detects mill daemon but classifies it as Scala/JVM (missing classification for MillDaemonMain)") {
+  test("detects mill daemon and classifies it using main class name (MillDaemonMain)") {
     val results = MacOsProbe.parsePsLines(psOutputLines, selfPid = -1, debug = new Debug(false), cwdResolver = noCwd)
     val mill = results.find(_.pid == 2983)
     assert(mill.isDefined, s"Expected mill daemon (PID 2983) to be detected but got: ${results.map(_.kind)}")
     assertEquals(mill.get.memPercent, 0.2)
     assertEquals(mill.get.ramKb, 75664L)
-    assertEquals(mill.get.kind, "Scala/JVM", "mill.daemon.MillDaemonMain is not in the classification list, so it falls through to Scala/JVM")
+    assertEquals(mill.get.kind, "mill.daemon.MillDaemonMain", "mill.daemon.MillDaemonMain is not in the classification list, so it falls through to the main class name")
   }
 
   test("does not detect mill native launcher (no scala indicators in binary name)") {
@@ -39,7 +39,8 @@ class PsOutputParsingSuite extends munit.FunSuite {
     assertEquals(results.size, 3, s"Expected exactly 3 Scala processes, got ${results.size} with kinds: ${results.map(_.kind)}")
     val kinds = results.map(_.kind).toSet
     assert(kinds.contains("Bloop"), "Bloop server should be classified as Bloop")
-    assert(kinds.contains("Scala/JVM"), "Mill daemon and user app should fall through to Scala/JVM")
+    assert(kinds.contains("mill.daemon.MillDaemonMain"), "Mill daemon should fall through to main class name")
+    assert(kinds.contains("com.example.myapp.Main"), "User app should fall through to main class name")
   }
 
   test("does not detect non-JVM processes like zsh, docker, launchd") {
