@@ -14,8 +14,8 @@ jobs:
         include:
           - os: ubuntu-latest
             artifact: scala-monitor-linux
-          - os: macos-latest
-            artifact: scala-monitor-darwin
+          - os: macos-14
+            artifact: scala-monitor-aarch64-apple-darwin
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -23,7 +23,7 @@ jobs:
       - uses: VirtusLab/scala-cli-setup@v1
 
       - name: Unit tests
-        run: scala-cli test .
+        run: scala-cli --power test .
 
       - name: Build native binary
         run: scala-cli --power package . -o scala-monitor --native
@@ -38,6 +38,58 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: scala-monitor
+
+  publish-snapshot:
+    needs: build
+    if: |
+      github.ref == 'refs/heads/main' || 
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: VirtusLab/scala-cli-setup@v1
+        with:
+          power: true
+
+      - name: Publish snapshot
+        run: |
+          scala-cli config publish.credentials central.sonatype.com env:SONATYPE_USERNAME env:SONATYPE_PASSWORD
+          scala-cli config publish.credentials ossrh-staging-api.central.sonatype.com env:SONATYPE_USERNAME env:SONATYPE_PASSWORD
+          ./.github/workflows/import-gpg.sh
+          scala-cli publish . --signer gpg --gpg-key DB33C5B9DA1A245B
+        env:
+          PGP_PASSPHRASE: ""
+          PGP_SECRET: ${{ secrets.PGP_SECRET }}
+          SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: VirtusLab/scala-cli-setup@v1
+        with:
+          power: true
+
+      - name: Publish to Sonatype
+        run: |
+          scala-cli config publish.credentials central.sonatype.com env:SONATYPE_USERNAME env:SONATYPE_PASSWORD
+          scala-cli config publish.credentials ossrh-staging-api.central.sonatype.com env:SONATYPE_USERNAME env:SONATYPE_PASSWORD
+          ./.github/workflows/import-gpg.sh
+          scala-cli publish . --signer gpg --gpg-key DB33C5B9DA1A245B
+        env:
+          PGP_PASSPHRASE: ""
+          PGP_SECRET: ${{ secrets.PGP_SECRET }}
+          SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
 
   release:
     needs: build
@@ -54,7 +106,8 @@ jobs:
         run: |
           mkdir -p release-assets
           mv artifacts/scala-monitor-linux/scala-monitor release-assets/scala-monitor-linux
-          mv artifacts/scala-monitor-darwin/scala-monitor release-assets/scala-monitor-darwin
+          mv artifacts/scala-monitor-aarch64-apple-darwin/scala-monitor release-assets/scala-monitor-aarch64-apple-darwin
+          cp release-assets/scala-monitor-aarch64-apple-darwin release-assets/scala-monitor-darwin
 
       - name: Release
         uses: softprops/action-gh-release@v2
