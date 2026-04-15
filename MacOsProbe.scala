@@ -12,6 +12,7 @@ class MacOsProbe(debug: Debug) extends PlatformProbe {
   private val VnodeInfoStructSize = 2352
   private val ProcPidTaskInfo = 4
   private val ProcTaskInfoSize = 96
+  private val ProcTaskInfoThreadCountOffset = 84
 
   debug.log(s"Platform: macOS (isMac=${LinktimeInfo.isMac}, isLinux=${LinktimeInfo.isLinux}, is32Bit=${LinktimeInfo.is32BitPlatform})")
 
@@ -28,10 +29,10 @@ class MacOsProbe(debug: Debug) extends PlatformProbe {
   private def readThreadCount(pid: Int): Int = Zone.acquire { implicit z =>
     val buffer = alloc[Byte](ProcTaskInfoSize)
     val bytesWritten = libproc.proc_pidinfo(pid, ProcPidTaskInfo, 0L, buffer, ProcTaskInfoSize)
-    if (bytesWritten <= 0) 0
+    if (bytesWritten <= ProcTaskInfoSize) 0
     else {
-      val ptr = (buffer + 84).asInstanceOf[Ptr[CInt]]
-      !ptr
+      val ptr = (buffer + ProcTaskInfoThreadCountOffset).asInstanceOf[Ptr[CInt]]
+      math.max(0, !ptr)
     }
   }
 
