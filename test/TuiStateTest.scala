@@ -14,7 +14,7 @@ class TuiStateTest extends munit.FunSuite {
     processes = sampleProcesses,
     selectedIndex = 0,
     sortColumn = SortColumn.Ram,
-    sortDescending = true,
+    sortDirection = SortDirection.Descending,
     statusMessage = None,
     statusMessageExpiresAt = 0L,
     confirmation = ConfirmationKind.None,
@@ -48,10 +48,10 @@ class TuiStateTest extends munit.FunSuite {
   }
 
   test("SortCycle changes sort column and resets to descending") {
-    val sorted = initialState.copy(sortColumn = SortColumn.Ram, sortDescending = true)
+    val sorted = initialState.copy(sortColumn = SortColumn.Ram, sortDirection = SortDirection.Descending)
     val result = updateState(SortCycle, sorted)
     assertNotEquals(result.sortColumn, SortColumn.Ram)
-    assertEquals(result.sortDescending, true)
+    assertEquals(result.sortDirection, SortDirection.Descending)
   }
 
   test("RequestSigterm sets status flash") {

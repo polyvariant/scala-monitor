@@ -9,23 +9,23 @@ class SortTest extends munit.FunSuite {
   )
 
   test("sort by PID ascending") {
-    val result = TuiApp.sort(procs, SortColumn.Pid, ascending = true)
+    val result = TuiApp.sort(procs, SortColumn.Pid, SortDirection.Ascending)
     assertEquals(result.map(_.pid), List(100, 200, 300))
   }
 
   test("sort by RAM descending") {
-    val result = TuiApp.sort(procs, SortColumn.Ram, ascending = false)
+    val result = TuiApp.sort(procs, SortColumn.Ram, SortDirection.Descending)
     assertEquals(result.head.pid, 300)
     assertEquals(result.last.pid, 200)
   }
 
   test("sort by Kind groups by type") {
-    val result = TuiApp.sort(procs, SortColumn.Kind, ascending = true)
+    val result = TuiApp.sort(procs, SortColumn.Kind, SortDirection.Ascending)
     assertEquals(result.map(_.kind), List("Bloop", "Metals", "sbt"))
   }
 
   test("sort by MemPercent descending") {
-    val result = TuiApp.sort(procs, SortColumn.MemPercent, ascending = false)
+    val result = TuiApp.sort(procs, SortColumn.MemPercent, SortDirection.Descending)
     assertEquals(result.head.kind, "sbt")
     assertEquals(result.last.kind, "Bloop")
   }

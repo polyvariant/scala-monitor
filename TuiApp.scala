@@ -24,7 +24,7 @@ case class TuiState(
   processes: List[ScalaProcess],
   selectedIndex: Int,
   sortColumn: SortColumn,
-  sortDescending: Boolean,
+  sortDirection: SortDirection,
   statusMessage: Option[String],
   statusMessageExpiresAt: Long,
   confirmation: ConfirmationKind,
@@ -56,9 +56,20 @@ case object ToggleHelp extends TuiMsg
 case object JumpToFirst extends TuiMsg
 case object JumpToLast extends TuiMsg
 
+enum SortDirection {
+  case Ascending
+  case Descending
+
+  def swap: SortDirection =
+    this match {
+      case Ascending => Descending
+      case Descending => Ascending
+    }
+}
+
 object TuiApp {
 
-  def sort(procs: List[ScalaProcess], column: SortColumn, ascending: Boolean): List[ScalaProcess] = {
+  def sort(procs: List[ScalaProcess], column: SortColumn, sorting: SortDirection): List[ScalaProcess] = {
     val ordering = column match {
       case SortColumn.Pid       => Ordering.by[ScalaProcess, Int](_.pid)
       case SortColumn.Kind      => Ordering.by[ScalaProcess, String](_.kind)
@@ -67,7 +78,7 @@ object TuiApp {
       case SortColumn.Project   => Ordering.by[ScalaProcess, String](_.projectPath)
     }
     val sorted = procs.sorted(using ordering)
-    if (ascending) sorted else sorted.reverse
+    if (sorting == SortDirection.Ascending) sorted else sorted.reverse
   }
 
   def run(debug: Boolean): Unit = {
@@ -88,13 +99,13 @@ class TuiApp(debug: Boolean, processActions: ProcessActions) extends LayoutzApp[
 
   def init: (TuiState, Cmd[TuiMsg]) = {
     val procs = ScalaMonitor.discover(debug)
-    val sorted = TuiApp.sort(procs, SortColumn.Ram, ascending = false)
+    val sorted = TuiApp.sort(procs, SortColumn.Ram, SortDirection.Descending)
     val tw = math.min(210, SttyTerminal.create().map(_.terminalWidth()).getOrElse(80))
     val state = TuiState(
       processes = sorted,
       selectedIndex = 0,
       sortColumn = SortColumn.Ram,
-      sortDescending = true,
+      sortDirection = SortDirection.Descending,
       statusMessage = None,
       statusMessageExpiresAt = 0L,
       confirmation = ConfirmationKind.None,
@@ -114,7 +125,7 @@ class TuiApp(debug: Boolean, processActions: ProcessActions) extends LayoutzApp[
       })
 
     case ProcessesLoaded(procs) =>
-      val sorted = TuiApp.sort(procs, state.sortColumn, state.sortDescending)
+      val sorted = TuiApp.sort(procs, state.sortColumn, state.sortDirection)
       val maxIdx = math.max(0, sorted.size - 1)
       val clamped = math.min(state.selectedIndex, maxIdx)
       state.copy(processes = sorted, selectedIndex = clamped)
@@ -131,8 +142,8 @@ class TuiApp(debug: Boolean, processActions: ProcessActions) extends LayoutzApp[
       val currentIdx = columns.indexOf(state.sortColumn)
       val nextIdx = (currentIdx + 1) % columns.size
       val nextCol = columns(nextIdx)
-      val sorted = TuiApp.sort(state.processes, nextCol, ascending = false)
-      state.copy(processes = sorted, sortColumn = nextCol, sortDescending = true)
+      val sorted = TuiApp.sort(state.processes, nextCol, SortDirection.Descending)
+      state.copy(processes = sorted, sortColumn = nextCol, sortDirection = SortDirection.Descending)
 
     case RequestSigterm =>
       state.processes.lift(state.selectedIndex) match {
@@ -270,7 +281,7 @@ class TuiApp(debug: Boolean, processActions: ProcessActions) extends LayoutzApp[
       case SortColumn.MemPercent => "MEM%"
       case SortColumn.Project   => "PROJ"
     }
-    val sortArrow = if (state.sortDescending) "\u25BE" else "\u25B4"
+    val sortArrow = if (state.sortDirection == SortDirection.Descending) "\u25BE" else "\u25B4"
     val titleText = s" SCALA MONITOR \u2500\u2500 ${state.processes.size} $processWord \u2500\u2500 ${ScalaMonitor.formatMemory(totalRam)} \u2500\u2500 $sortLabel $sortArrow "
     val brandText = "https://polyvariant.org"
     val brandW = brandText.length

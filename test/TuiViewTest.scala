@@ -11,7 +11,7 @@ class TuiViewTest extends munit.FunSuite with SnapshotTest {
     processes = sampleProcesses,
     selectedIndex = 0,
     sortColumn = SortColumn.Ram,
-    sortDescending = true,
+    sortDirection = SortDirection.Descending,
     statusMessage = None,
     statusMessageExpiresAt = 0L,
     confirmation = ConfirmationKind.None,
