@@ -7,15 +7,28 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
-            artifact: scala-monitor-linux
-          - os: macos-14
+            artifact: scala-monitor-x86_64-pc-linux
+            run-integration: true
+          - os: ubuntu-24.04-arm
+            artifact: scala-monitor-aarch64-pc-linux
+            run-integration: false
+          - os: macos-15
             artifact: scala-monitor-aarch64-apple-darwin
+            run-integration: false
+          - os: macos-15-intel
+            artifact: scala-monitor-x86_64-apple-darwin
+            run-integration: false
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -26,25 +39,27 @@ jobs:
         run: scala-cli --power test .
 
       - name: Build native binary
-        run: scala-cli --power package . -o scala-monitor --native
+        run: scala-cli --power package . -o ${{ matrix.artifact }} --native
 
       - name: Install sbt
+        if: matrix.run-integration
         run: cs install sbt --install-dir /usr/local/bin
 
       - name: Integration test
+        if: matrix.run-integration
         run: scripts/integration-test.sh
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: scala-monitor
+          path: ${{ matrix.artifact }}
 
   publish:
     needs: build
     if: |
       startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' ||
       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -74,15 +89,21 @@ jobs:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
+        id: download
         with:
           path: artifacts
 
       - name: Prepare release assets
         run: |
           mkdir -p release-assets
-          mv artifacts/scala-monitor-linux/scala-monitor release-assets/scala-monitor-linux
-          mv artifacts/scala-monitor-aarch64-apple-darwin/scala-monitor release-assets/scala-monitor-aarch64-apple-darwin
+          mv artifacts/scala-monitor-x86_64-pc-linux/scala-monitor-x86_64-pc-linux release-assets/
+          mv artifacts/scala-monitor-aarch64-pc-linux/scala-monitor-aarch64-pc-linux release-assets/
+          mv artifacts/scala-monitor-aarch64-apple-darwin/scala-monitor-aarch64-apple-darwin release-assets/
+          mv artifacts/scala-monitor-x86_64-apple-darwin/scala-monitor-x86_64-apple-darwin release-assets/
+          # Backward-compat alias: scala-monitor-darwin -> aarch64
           cp release-assets/scala-monitor-aarch64-apple-darwin release-assets/scala-monitor-darwin
+          # Backward-compat alias: scala-monitor-linux -> x86_64
+          cp release-assets/scala-monitor-x86_64-pc-linux release-assets/scala-monitor-linux
 
       - name: Release
         uses: softprops/action-gh-release@v2

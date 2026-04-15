@@ -4,8 +4,14 @@ CLI utility that discovers running Scala/JVM-related processes (sbt, bloop, meta
 
 ## Install
 
+**Linux (x86_64 / aarch64):**
 ```sh
-curl -sL https://github.com/polyvariant/scala-monitor/releases/latest/download/scala-monitor-$(uname -s | tr '[:upper:]' '[:lower:]') > scala-monitor && chmod +x scala-monitor && ./scala-monitor
+ARCH=$(uname -m | sed 's/arm64/aarch64/') && curl -sL https://github.com/polyvariant/scala-monitor/releases/latest/download/scala-monitor-${ARCH}-pc-linux > scala-monitor && chmod +x scala-monitor && ./scala-monitor
+```
+
+**macOS (Apple Silicon / Intel):**
+```sh
+ARCH=$(uname -m | sed 's/arm64/aarch64/') && curl -sL https://github.com/polyvariant/scala-monitor/releases/latest/download/scala-monitor-${ARCH}-apple-darwin > scala-monitor && chmod +x scala-monitor && ./scala-monitor
 ```
 
 ## Build from source
