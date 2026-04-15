@@ -109,15 +109,98 @@ object ScalaMonitor {
       val optionsWithSeparateValue = Set(
         "-cp", "-classpath", "--class-path",
         "--module-path", "-p", "--upgrade-module-path",
-        "-jar",
       )
       def find(remaining: List[String]): Option[String] = remaining match {
         case Nil => None
+        // -jar switches Java into jar-launch mode: the next token is the jar path,
+        // not a main class. Read Main-Class from the manifest, falling back to the
+        // jar filename if the manifest can't be read.
+        case "-jar" :: jarPath :: _ => readJarMainClass(jarPath).orElse(Some(jarPath.split('/').last))
+        case "-jar" :: Nil => None
         case head :: tail if optionsWithSeparateValue(head) => find(tail.drop(1))
         case head :: tail if head.startsWith("-") => find(tail)
         case head :: _ => Some(head)
       }
       find(afterJava)
+    }
+  }
+
+  // Reads the Main-Class attribute from the MANIFEST.MF inside a JAR file.
+  // JARs are ZIP files; we walk local file headers until we find META-INF/MANIFEST.MF
+  // stored without compression (method 0), then parse Main-Class from its content.
+  // Returns None if the file can't be read, the manifest entry is missing, or it is
+  // compressed (deflate), which is rare in practice for JAR manifests.
+  private[polyvariant] def readJarMainClass(jarPath: String): Option[String] = {
+    import java.io.FileInputStream
+
+    // Reads exactly n bytes from fis; returns None if the stream ends prematurely.
+    def readFully(fis: FileInputStream, n: Int): Option[Array[Byte]] = {
+      val buf = new Array[Byte](n)
+      @scala.annotation.tailrec
+      def loop(offset: Int): Option[Array[Byte]] =
+        if (offset >= n) Some(buf)
+        else {
+          val read = fis.read(buf, offset, n - offset)
+          if (read < 0) None else loop(offset + read)
+        }
+      loop(0)
+    }
+
+    def le2(b: Array[Byte], off: Int): Int =
+      (b(off) & 0xff) | ((b(off + 1) & 0xff) << 8)
+
+    def le4(b: Array[Byte], off: Int): Int =
+      (b(off) & 0xff) | ((b(off + 1) & 0xff) << 8) |
+      ((b(off + 2) & 0xff) << 16) | ((b(off + 3) & 0xff) << 24)
+
+    // Scans local file entries sequentially until META-INF/MANIFEST.MF is found.
+    def scan(fis: FileInputStream): Option[String] = {
+      readFully(fis, 4) match {
+        case None => None
+        case Some(sig) =>
+          // Local file header signature: PK\x03\x04
+          if (sig(0) != 0x50 || sig(1) != 0x4b || sig(2) != 0x03 || sig(3) != 0x04) None
+          else readFully(fis, 26) match { // bytes 4–29 of the fixed-size header
+            case None => None
+            case Some(hdr) =>
+              val method   = le2(hdr,  4) // compression method (offset 8 in full header)
+              val compSize = le4(hdr, 14) // compressed size    (offset 18)
+              val fnLen    = le2(hdr, 22) // file name length   (offset 26)
+              val extraLen = le2(hdr, 24) // extra field length (offset 28)
+              readFully(fis, fnLen) match {
+                case None => None
+                case Some(fnBytes) =>
+                  val filename = new String(fnBytes, java.nio.charset.StandardCharsets.UTF_8)
+                  readFully(fis, extraLen) match { // skip extra field
+                    case None => None
+                    case Some(_) =>
+                      if (filename == "META-INF/MANIFEST.MF") {
+                        if (method == 0) { // STORED — read manifest bytes directly
+                          readFully(fis, compSize) match {
+                            case None => None
+                            case Some(data) =>
+                              val text = new String(data, java.nio.charset.StandardCharsets.UTF_8)
+                              text.linesIterator.collectFirst {
+                                case line if line.startsWith("Main-Class:") =>
+                                  line.drop("Main-Class:".length).trim
+                              }
+                          }
+                        } else None // manifest is deflate-compressed; skip
+                      } else {
+                        readFully(fis, compSize) // skip file data
+                        scan(fis)               // advance to next entry
+                      }
+                  }
+              }
+          }
+      }
+    }
+
+    try {
+      val fis = new FileInputStream(jarPath)
+      try scan(fis) finally fis.close()
+    } catch {
+      case _: Exception => None
     }
   }
 

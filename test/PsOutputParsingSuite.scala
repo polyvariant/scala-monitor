@@ -1,5 +1,7 @@
 package org.polyvariant
 
+import java.io.FileOutputStream
+
 class PsOutputParsingSuite extends munit.FunSuite {
 
   lazy val psOutputLines: List[String] = {
@@ -9,6 +11,68 @@ class PsOutputParsingSuite extends munit.FunSuite {
   }
 
   val noCwd: Int => Option[String] = _ => None
+
+  // ---------------------------------------------------------------------------
+  // Minimal stored-ZIP helper used by the -jar tests.
+  // Writes a single STORED (uncompressed) entry into a ZIP file.
+  // ---------------------------------------------------------------------------
+  private def writeStoredZipEntry(
+    fos: FileOutputStream,
+    entryName: String,
+    entryContent: Array[Byte],
+  ): (Int, Int) = { // returns (localHeaderOffset, totalBytesWritten)
+    def le2(v: Int): Array[Byte] = Array((v & 0xff).toByte, ((v >> 8) & 0xff).toByte)
+    def le4(v: Int): Array[Byte] = Array(
+      (v & 0xff).toByte, ((v >> 8) & 0xff).toByte,
+      ((v >> 16) & 0xff).toByte, ((v >> 24) & 0xff).toByte,
+    )
+    val fnBytes = entryName.getBytes("UTF-8")
+    val localHeaderOffset = 0
+    // Local file header
+    fos.write(Array(0x50, 0x4b, 0x03, 0x04).map(_.toByte)) // signature
+    fos.write(le2(20))                    // version needed
+    fos.write(le2(0))                     // flags
+    fos.write(le2(0))                     // compression: stored
+    fos.write(le2(0)); fos.write(le2(0))  // mod time, mod date
+    fos.write(le4(0))                     // CRC-32 (not checked by our reader)
+    fos.write(le4(entryContent.length))   // compressed size
+    fos.write(le4(entryContent.length))   // uncompressed size
+    fos.write(le2(fnBytes.length))        // filename length
+    fos.write(le2(0))                     // extra field length
+    fos.write(fnBytes)
+    fos.write(entryContent)
+    val localEntrySize = 30 + fnBytes.length + entryContent.length
+    // Central directory entry
+    fos.write(Array(0x50, 0x4b, 0x01, 0x02).map(_.toByte))
+    fos.write(le2(20)); fos.write(le2(20))           // versions
+    fos.write(le2(0)); fos.write(le2(0))             // flags, compression
+    fos.write(le2(0)); fos.write(le2(0))             // mod time, mod date
+    fos.write(le4(0))                                // CRC-32
+    fos.write(le4(entryContent.length))              // compressed size
+    fos.write(le4(entryContent.length))              // uncompressed size
+    fos.write(le2(fnBytes.length))                   // filename length
+    fos.write(le2(0)); fos.write(le2(0))             // extra, comment lengths
+    fos.write(le2(0)); fos.write(le2(0))             // disk start, internal attrs
+    fos.write(le4(0))                                // external attrs
+    fos.write(le4(localHeaderOffset))                // local header offset
+    fos.write(fnBytes)
+    val cdEntrySize = 46 + fnBytes.length
+    // End of central directory record
+    fos.write(Array(0x50, 0x4b, 0x05, 0x06).map(_.toByte))
+    fos.write(le2(0)); fos.write(le2(0))  // disk numbers
+    fos.write(le2(1)); fos.write(le2(1))  // entries on disk / total
+    fos.write(le4(cdEntrySize))           // central directory size
+    fos.write(le4(localEntrySize))        // central directory offset
+    fos.write(le2(0))                     // comment length
+    (localHeaderOffset, localEntrySize + cdEntrySize + 22)
+  }
+
+  private def writeTestJar(path: String, manifestContent: String): Unit = {
+    val fos = new FileOutputStream(path)
+    try {
+      writeStoredZipEntry(fos, "META-INF/MANIFEST.MF", manifestContent.getBytes("UTF-8"))
+    } finally fos.close()
+  }
 
   test("detects bloop server from real macOS ps output") {
     val results = MacOsProbe.parsePsLines(psOutputLines, selfPid = -1, debug = new Debug(false), cwdResolver = noCwd)
@@ -93,6 +157,40 @@ class PsOutputParsingSuite extends munit.FunSuite {
     assertEquals(results.size, 2)
     assertEquals(results.find(_.pid == 1001).get.kind, "Metals")
     assertEquals(results.find(_.pid == 1002).get.kind, "sbt")
+  }
+
+  // ---------------------------------------------------------------------------
+  // -jar / JAR manifest reading tests
+  // ---------------------------------------------------------------------------
+
+  test("readJarMainClass extracts Main-Class from a STORED manifest entry") {
+    val jarPath = "/tmp/test-main-class.jar"
+    writeTestJar(jarPath, "Manifest-Version: 1.0\r\nMain-Class: com.example.JarApp\r\n\r\n")
+    assertEquals(ScalaMonitor.readJarMainClass(jarPath), Some("com.example.JarApp"))
+  }
+
+  test("readJarMainClass returns None when manifest has no Main-Class") {
+    val jarPath = "/tmp/test-no-main-class.jar"
+    writeTestJar(jarPath, "Manifest-Version: 1.0\r\n\r\n")
+    assertEquals(ScalaMonitor.readJarMainClass(jarPath), None)
+  }
+
+  test("readJarMainClass returns None for a non-existent file") {
+    assertEquals(ScalaMonitor.readJarMainClass("/tmp/does-not-exist-xyz.jar"), None)
+  }
+
+  test("extractMainClass uses manifest Main-Class for java -jar invocation") {
+    val jarPath = "/tmp/test-jar-extract.jar"
+    writeTestJar(jarPath, "Manifest-Version: 1.0\r\nMain-Class: com.example.ViaJar\r\n\r\n")
+    val cmdline = s"/usr/bin/java -Xmx512m -jar $jarPath arg1"
+    assertEquals(ScalaMonitor.extractMainClass(cmdline), Some("com.example.ViaJar"))
+  }
+
+  test("extractMainClass falls back to jar filename when manifest has no Main-Class") {
+    val jarPath = "/tmp/test-jar-noclass.jar"
+    writeTestJar(jarPath, "Manifest-Version: 1.0\r\n\r\n")
+    val cmdline = s"/usr/bin/java -jar $jarPath"
+    assertEquals(ScalaMonitor.extractMainClass(cmdline), Some("test-jar-noclass.jar"))
   }
 
 }
