@@ -106,10 +106,10 @@ object ScalaMonitor {
       val afterJava = args.drop(javaIndex + 1)
       def find(remaining: List[String]): Option[String] = remaining match {
         case Nil => None
-        case head :: tail =>
-          if (head == "-cp" || head == "-classpath" || head == "--class-path") find(tail.drop(1))
-          else if (head.startsWith("-")) find(tail)
-          else Some(head)
+        case head :: Nil if head == "-cp" || head == "-classpath" || head == "--class-path" => None
+        case head :: _ :: tail if head == "-cp" || head == "-classpath" || head == "--class-path" => find(tail)
+        case head :: tail if head.startsWith("-") => find(tail)
+        case head :: _ => Some(head)
       }
       find(afterJava)
     }
