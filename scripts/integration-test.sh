@@ -95,6 +95,23 @@ else
   PASS=false
 fi
 
+if "$MONITOR" --help | grep -q "tui"; then
+  echo "  PASS: --help contains tui"
+else
+  echo "  FAIL: --help missing tui"
+  PASS=false
+fi
+
+# Verify one-shot mode still works with -o pid
+PID_OUTPUT=$("$MONITOR" -o pid)
+if echo "$PID_OUTPUT" | grep -qE '^[0-9]+$'; then
+  echo "  PASS: -o pid returns PIDs"
+else
+  echo "  FAIL: -o pid did not return numeric PIDs"
+  echo "        output was: $PID_OUTPUT"
+  PASS=false
+fi
+
 if $PASS; then
   echo ""
   echo "ALL ASSERTIONS PASSED"

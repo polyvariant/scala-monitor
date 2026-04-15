@@ -24,22 +24,28 @@ object ScalaMonitor {
     @arg(short = 'f', doc = "Filter processes by key=value (repeatable). Keys: type, project. Use * as wildcard for contains matching, case insensitive")
     filter: Seq[String] = Seq.empty,
     @arg(short = 'd', doc = "Enable verbose debug logging to stderr")
-    debug: Flag = Flag()
+    debug: Flag = Flag(),
+    @arg(short = 'w', doc = "Interactive TUI mode (like top)")
+    tui: Flag = Flag()
   ): Unit = {
-    val processes = discover(debug.value)
-    val (filtered, warnings) = applyFilters(processes, filter.toList)
-    warnings.foreach(w => System.err.println(s"Warning: $w"))
-    if (filtered.isEmpty) println("No Scala-related processes found.")
-    else OutputFormat.parse(output) match {
-      case OutputFormat.Pid  => filtered.foreach(p => println(p.pid))
-      case OutputFormat.Full => print(renderTable(filtered))
+    if (tui.value) {
+      TuiApp.run(debug.value)
+    } else {
+      val processes = discover(debug.value)
+      val (filtered, warnings) = applyFilters(processes, filter.toList)
+      warnings.foreach(w => System.err.println(s"Warning: $w"))
+      if (filtered.isEmpty) println("No Scala-related processes found.")
+      else OutputFormat.parse(output) match {
+        case OutputFormat.Pid  => filtered.foreach(p => println(p.pid))
+        case OutputFormat.Full => print(renderTable(filtered))
+      }
     }
   }
 
   def main(args: Array[String]): Unit =
     mainargs.ParserForMethods(this).runOrExit(args.toIndexedSeq)
 
-  private def discover(debug: Boolean): List[ScalaProcess] = {
+  def discover(debug: Boolean): List[ScalaProcess] = {
     val dbg = new Debug(debug)
     val selfPid = unistd.getpid()
     dbg.log(s"Discovering processes (selfPid=$selfPid)")
@@ -82,10 +88,22 @@ object ScalaMonitor {
     (top ++ rows ++ bottom).mkString("\n") + "\n"
   }
 
+  def extractMainClass(cmdline: String): Option[String] = {
+    val tokens = cmdline.split("\\s+").drop(1)
+    tokens.find { t =>
+      t.contains(".") &&
+      !t.startsWith("-") &&
+      !t.contains("/") &&
+      !t.endsWith(".jar") &&
+      t.split("\\.").forall(seg => seg.nonEmpty && seg.head.isLetter)
+    }
+  }
+
   def classify(cmdline: String, debug: Debug): String = {
     val result = classifications
       .find(c => cmdline.contains(c.pattern))
       .map(_.name)
+      .orElse(extractMainClass(cmdline))
       .getOrElse("Scala/JVM")
     debug.log(s"  classify('$cmdline') → '$result'")
     result
@@ -144,7 +162,7 @@ object ScalaMonitor {
       }
     }
 
-  private def formatMemory(kb: Long): String =
+  def formatMemory(kb: Long): String =
     if (kb >= 1024L * 1024L) f"${kb.toDouble / (1024.0 * 1024.0)}%.1f GB"
     else if (kb >= 1024L) f"${kb.toDouble / 1024.0}%.0f MB"
     else s"$kb kB"

@@ -7,21 +7,33 @@ import java.nio.charset.StandardCharsets
 
 class MacOsProbe(debug: Debug) extends PlatformProbe {
 
-  // proc_pidinfo() "flavor" codes — select which kernel struct to return
-  private val ProcPidVnodePathInfo = 9 // struct proc_vnodepathinfo: cwd + root dir paths
-
-  // struct proc_vnodepathinfo holds two vnode entries (cwd, root).
-  // Each entry = 152-byte vinfo_stat header + MAXPATHLEN path bytes.
-  // The CWD path string starts at byte 152 (immediately after the first header).
+  private val ProcPidVnodePathInfo = 9
   private val VnodeInfoCwdPathOffset = 152
-  private val VnodeInfoStructSize = 2352 // 2 x (152 + MAXPATHLEN)
+  private val VnodeInfoStructSize = 2352
+  private val ProcPidTaskInfo = 4
+  private val ProcTaskInfoSize = 96
+  private val ProcTaskInfoThreadCountOffset = 84
 
   debug.log(s"Platform: macOS (isMac=${LinktimeInfo.isMac}, isLinux=${LinktimeInfo.isLinux}, is32Bit=${LinktimeInfo.is32BitPlatform})")
 
   def discover(selfPid: Int): List[ScalaProcess] = {
     val lines = runPsCommand()
     debug.log(s"ps returned ${lines.size} lines")
-    MacOsProbe.parsePsLines(lines, selfPid, debug, cwdResolver = readProcessWorkingDirectory)
+    MacOsProbe.parsePsLines(
+      lines, selfPid, debug,
+      cwdResolver = readProcessWorkingDirectory,
+      threadCountResolver = readThreadCount
+    )
+  }
+
+  private def readThreadCount(pid: Int): Int = Zone.acquire { implicit z =>
+    val buffer = alloc[Byte](ProcTaskInfoSize)
+    val bytesWritten = libproc.proc_pidinfo(pid, ProcPidTaskInfo, 0L, buffer, ProcTaskInfoSize)
+    if (bytesWritten <= ProcTaskInfoSize) 0
+    else {
+      val ptr = (buffer + ProcTaskInfoThreadCountOffset).asInstanceOf[Ptr[CInt]]
+      math.max(0, !ptr)
+    }
   }
 
   private def readProcessWorkingDirectory(pid: Int): Option[String] = Zone.acquire { implicit z =>
@@ -69,7 +81,8 @@ object MacOsProbe {
     lines: List[String],
     selfPid: Int,
     debug: Debug,
-    cwdResolver: Int => Option[String]
+    cwdResolver: Int => Option[String],
+    threadCountResolver: Int => Int = _ => 0
   ): List[ScalaProcess] = {
     val parsed = lines.flatMap { line =>
       val parts = line.trim.split("\\s+", 4)
@@ -106,7 +119,7 @@ object MacOsProbe {
         kind = ScalaMonitor.classify(cmdline, debug),
         ramKb = residentKb,
         swapKb = None,
-        threads = 0,
+        threads = threadCountResolver(pid),
         memPercent = memPercent,
         projectPath = cwd.map(ScalaMonitor.shortenPath).getOrElse("unknown")
       )
