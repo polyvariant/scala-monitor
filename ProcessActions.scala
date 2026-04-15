@@ -11,17 +11,21 @@ trait ProcessActions {
 
 class ProcessActionsLive(signal: PosixSignal) extends ProcessActions {
 
-  def sendSigterm(pid: Int): Either[ProcessActionFailed, String] = {
-    val result = signal.kill(pid, signal.SIGTERM)
-    if (result == 0) Right(s"SIGTERM sent to PID $pid")
-    else Left(ProcessActionFailed(s"kill($pid, SIGTERM) failed"))
-  }
+  def sendSigterm(pid: Int): Either[ProcessActionFailed, String] =
+    if(pid <= 0) Left(ProcessActionFailed(s"Only positive pid allowed, got: $pid"))
+    else {
+      val result = signal.kill(pid, signal.SIGTERM)
+      if (result == 0) Right(s"SIGTERM sent to PID $pid")
+      else Left(ProcessActionFailed(s"kill($pid, SIGTERM) failed"))
+    }
 
-  def sendSigkill(pid: Int): Either[ProcessActionFailed, String] = {
-    val result = signal.kill(pid, signal.SIGKILL)
-    if (result == 0) Right(s"SIGKILL sent to PID $pid")
-    else Left(ProcessActionFailed(s"kill($pid, SIGKILL) failed"))
-  }
+  def sendSigkill(pid: Int): Either[ProcessActionFailed, String] = 
+    if(pid <= 0) Left(ProcessActionFailed(s"Only positive pid allowed, got: $pid"))
+    else {
+      val result = signal.kill(pid, signal.SIGKILL)
+      if (result == 0) Right(s"SIGKILL sent to PID $pid")
+      else Left(ProcessActionFailed(s"kill($pid, SIGKILL) failed"))
+    }
 
   def threadDump(pid: Int): Either[ProcessActionFailed, String] = {
     // TODO to be implemented in future PR
