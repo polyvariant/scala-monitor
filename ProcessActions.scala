@@ -24,10 +24,12 @@ class ProcessActionsLive(signal: PosixSignal) extends ProcessActions {
   }
 
   def threadDump(pid: Int): Either[ProcessActionFailed, String] = {
+    // TODO to be implemented in future PR
     Right(s"Thread dump requested for PID $pid -> /tmp/threads-$pid.hprof")
   }
 
   def heapDump(pid: Int): Either[ProcessActionFailed, String] = {
+    // TODO to be implemented in future PR
     Right(s"Heap dump requested for PID $pid -> /tmp/heap-$pid.hprof")
   }
 
