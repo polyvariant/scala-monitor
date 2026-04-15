@@ -39,10 +39,10 @@ jobs:
           name: ${{ matrix.artifact }}
           path: scala-monitor
 
-  publish-snapshot:
+  publish:
     needs: build
     if: |
-      github.ref == 'refs/heads/main' || 
+      startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' ||
       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-22.04
     steps:
@@ -54,32 +54,7 @@ jobs:
         with:
           power: true
 
-      - name: Publish snapshot
-        run: |
-          scala-cli config publish.credentials central.sonatype.com env:SONATYPE_USERNAME env:SONATYPE_PASSWORD
-          scala-cli config publish.credentials ossrh-staging-api.central.sonatype.com env:SONATYPE_USERNAME env:SONATYPE_PASSWORD
-          ./.github/workflows/import-gpg.sh
-          scala-cli publish . --signer gpg --gpg-key DB33C5B9DA1A245B
-        env:
-          PGP_PASSPHRASE: ""
-          PGP_SECRET: ${{ secrets.PGP_SECRET }}
-          SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
-          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
-
-  publish:
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: VirtusLab/scala-cli-setup@v1
-        with:
-          power: true
-
-      - name: Publish to Sonatype
+      - name: Publish
         run: |
           scala-cli config publish.credentials central.sonatype.com env:SONATYPE_USERNAME env:SONATYPE_PASSWORD
           scala-cli config publish.credentials ossrh-staging-api.central.sonatype.com env:SONATYPE_USERNAME env:SONATYPE_PASSWORD
