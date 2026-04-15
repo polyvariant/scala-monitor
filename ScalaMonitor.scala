@@ -200,7 +200,8 @@ object ScalaMonitor {
       val fis = new FileInputStream(jarPath)
       try scan(fis) finally fis.close()
     } catch {
-      case _: Exception => None
+      case _: java.io.IOException => None
+      case _: RuntimeException    => None // e.g. NegativeArraySizeException on corrupt data
     }
   }
 

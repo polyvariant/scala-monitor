@@ -21,12 +21,13 @@ class PsOutputParsingSuite extends munit.FunSuite {
     entryName: String,
     entryContent: Array[Byte],
   ): (Int, Int) = { // returns (localHeaderOffset, totalBytesWritten)
+    import java.nio.charset.StandardCharsets
     def le2(v: Int): Array[Byte] = Array((v & 0xff).toByte, ((v >> 8) & 0xff).toByte)
     def le4(v: Int): Array[Byte] = Array(
       (v & 0xff).toByte, ((v >> 8) & 0xff).toByte,
       ((v >> 16) & 0xff).toByte, ((v >> 24) & 0xff).toByte,
     )
-    val fnBytes = entryName.getBytes("UTF-8")
+    val fnBytes = entryName.getBytes(StandardCharsets.UTF_8)
     val localHeaderOffset = 0
     // Local file header
     fos.write(Array(0x50, 0x4b, 0x03, 0x04).map(_.toByte)) // signature
@@ -68,9 +69,10 @@ class PsOutputParsingSuite extends munit.FunSuite {
   }
 
   private def writeTestJar(path: String, manifestContent: String): Unit = {
+    import java.nio.charset.StandardCharsets
     val fos = new FileOutputStream(path)
     try {
-      writeStoredZipEntry(fos, "META-INF/MANIFEST.MF", manifestContent.getBytes("UTF-8"))
+      writeStoredZipEntry(fos, "META-INF/MANIFEST.MF", manifestContent.getBytes(StandardCharsets.UTF_8))
     } finally fos.close()
   }
 
