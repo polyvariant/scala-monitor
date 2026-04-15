@@ -96,20 +96,21 @@ object ScalaMonitor {
     // cmdline comes from NUL-separated /proc/cmdline (joined with spaces) or ps args=;
     // Java binary paths and classpath entries do not contain spaces in practice.
     val args = cmdline.split(" ").toList
-    val javaIndex = args.indexWhere { a =>
-      val name = a.lastIndexOf('/') match {
-        case -1 => a
-        case i  => a.substring(i + 1)
-      }
-      name == "java"
-    }
+    val javaIndex = args.indexWhere(a => a == "java" || a.endsWith("/java"))
     if (javaIndex < 0) None
     else {
       val afterJava = args.drop(javaIndex + 1)
+      // JVM options that consume the next token as their value (before the main class).
+      // All other multi-value options use = syntax (e.g. --add-opens=...) so only one
+      // token is consumed and they are handled by the startsWith("-") case.
+      val optionsWithSeparateValue = Set(
+        "-cp", "-classpath", "--class-path",
+        "--module-path", "-p", "--upgrade-module-path",
+        "-jar",
+      )
       def find(remaining: List[String]): Option[String] = remaining match {
         case Nil => None
-        case head :: Nil if head == "-cp" || head == "-classpath" || head == "--class-path" => None
-        case head :: _ :: tail if head == "-cp" || head == "-classpath" || head == "--class-path" => find(tail)
+        case head :: tail if optionsWithSeparateValue(head) => find(tail.drop(1))
         case head :: tail if head.startsWith("-") => find(tail)
         case head :: _ => Some(head)
       }
