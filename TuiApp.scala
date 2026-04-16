@@ -297,11 +297,13 @@ class TuiApp(debug: Boolean, processActions: ProcessActions) extends LayoutzApp[
     // layoutz table: 1 space padding each side per column, │ separators
     // 7 columns: 7*2 padding + 8 │ chars (left/right borders + inter-column)
     val tableOverhead = 7 * 2 + 8
-    val projectMaxWidth = math.max(7, state.termWidth - nonProjectContentW - tableOverhead)
+    val availWidth = state.termWidth - 1 // reserve 1 column
+    val projectMaxWidth = math.max(7, availWidth - nonProjectContentW - tableOverhead)
     val tableWidth = nonProjectContentW + projectMaxWidth + tableOverhead
     val titleAvail = math.max(1, tableWidth - brandW)
-    val displayTitle = if (titleText.length > titleAvail) titleText.take(titleAvail - 1) + "\u2026"
-    else titleText + (" " * (titleAvail - titleText.length))
+    val titleRealLen = realLength(titleText)
+    val displayTitle = if (titleRealLen > titleAvail) titleText.take(titleAvail - 1) + "\u2026"
+    else titleText + (" " * (titleAvail - titleRealLen))
 
     val titleRow = rowTight(
       (displayTitle: Element).color(Color.Cyan).style(Style.Bold),
@@ -356,7 +358,7 @@ class TuiApp(debug: Boolean, processActions: ProcessActions) extends LayoutzApp[
       layout(titleRow, table(tableHeadersE, tableRowsE).border(Border.Round))
     } else {
       val emptyTitleText = s" SCALA MONITOR \u2500\u2500 0 $processWord \u2500\u2500 0 kB "
-      val emptyAvail = math.max(1, state.termWidth - brandW)
+      val emptyAvail = math.max(1, availWidth - brandW)
       val emptyDisplayTitle = if (emptyTitleText.length > emptyAvail) emptyTitleText.take(emptyAvail - 1) + "\u2026"
       else emptyTitleText + (" " * (emptyAvail - emptyTitleText.length))
       val emptyTitleRow = rowTight(

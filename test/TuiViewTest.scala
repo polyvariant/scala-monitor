@@ -1,5 +1,7 @@
 package org.polyvariant
 
+import layoutz.realLength
+
 class TuiViewTest extends munit.FunSuite with SnapshotTest {
 
   val sampleProcesses = List(
@@ -100,7 +102,6 @@ class TuiViewTest extends munit.FunSuite with SnapshotTest {
     val wideMaxLine = wideRender.split("\n").map(_.length).max
     assert(wideMaxLine > narrowMaxLine, "wider terminal should produce wider table")
   }
-
   test("brand text aligns with table right border") {
     val rendered = viewRender(baseState)
     val lines = rendered.split("\n")
@@ -109,8 +110,10 @@ class TuiViewTest extends munit.FunSuite with SnapshotTest {
     val stripAnsi = "\u001b\\[[0-9;]*m".r
     val titleVisible = stripAnsi.replaceAllIn(titleLine, "")
     val borderVisible = stripAnsi.replaceAllIn(borderLine, "")
-    assert(titleVisible.length == borderVisible.length,
-      s"title visible (${titleVisible.length}) should match border visible (${borderVisible.length}), " +
+    val titleWidth = realLength(titleLine)
+    val borderWidth = realLength(borderLine)
+    assert(titleWidth == borderWidth,
+      s"title width ($titleWidth) should match border width ($borderWidth), " +
       s"title line: '$titleVisible', border: '$borderVisible'")
     assert(titleVisible.endsWith("polyvariant.org"), "brand text should be at end of title row")
   }
