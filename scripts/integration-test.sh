@@ -3,10 +3,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-MONITOR="$PROJECT_DIR/scala-monitor"
+MONITOR="${1:-$PROJECT_DIR/scala-monitor}"
 
 if [ ! -f "$MONITOR" ]; then
-  echo "ERROR: $MONITOR not found. Build first: scala-cli --power package . -o scala-monitor"
+  echo "ERROR: $MONITOR not found. Build first: scala-cli --power package . -o $MONITOR"
   exit 1
 fi
 

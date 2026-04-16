@@ -47,7 +47,7 @@ jobs:
 
       - name: Integration test
         if: matrix.run-integration
-        run: scripts/integration-test.sh
+        run: scripts/integration-test.sh ./${{ matrix.artifact }}
 
       - uses: actions/upload-artifact@v4
         with:
