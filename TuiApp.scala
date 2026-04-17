@@ -254,14 +254,16 @@ class TuiApp(debug: Boolean, processActions: ProcessActions) extends LayoutzApp[
           case Key.Escape if confirming    => Some(CancelConfirmation)
           case _ => None
         } else key match {
-          case Key.Char('q')              => Some(Quit)
-          case Key.Up                     => Some(MoveUp)
-          case Key.Down                   => Some(MoveDown)
+          case Key.Char('q')               => Some(Quit)
+          case Key.Up                      => Some(MoveUp)
+          case Key.Down                    => Some(MoveDown)
+          case Key.Char('k')               => Some(MoveUp)
+          case Key.Char('j')               => Some(MoveDown)
           case Key.Char('d')               => Some(RequestSigterm)
-          case Key.Char('k')               => Some(RequestSigkill)
+          case Key.Char('x')               => Some(RequestSigkill)
           case Key.Char('t')               => Some(RequestThreadDump)
           case Key.Char('h')               => Some(RequestHeapDump)
-          case Key.Char('F')               => Some(SortCycle)
+          case Key.Char('f')               => Some(SortCycle)
           case Key.Char('?')               => Some(ToggleHelp)
           case Key.Char('g')               => Some(JumpToFirst)
           case Key.Char('G')               => Some(JumpToLast)
@@ -373,7 +375,7 @@ class TuiApp(debug: Boolean, processActions: ProcessActions) extends LayoutzApp[
       layout(emptyTitleRow, box("")(emptyMsg).border(Border.Round))
     }
 
-    val footerText = " \u2191\u2193 nav  d term  k kill  t threads  h heap  F sort  ? help  q quit"
+    val footerText = " \u2191\u2193 kj nav  d term  x kill  t threads  h heap  F sort  ? help  q quit"
     val footer = (footerText: Element).color(Color.BrightBlack)
 
     val statusFlash = state.statusMessage.map { msg =>
@@ -400,13 +402,13 @@ class TuiApp(debug: Boolean, processActions: ProcessActions) extends LayoutzApp[
 
     val helpContent = layout(
       (" Navigation ": Element).style(Style.Bold),
-      "   \u2191\u2193        Navigate up / down",
+      "   \u2191\u2193 k / j    Navigate up / down",
       "   g / G       Jump to first / last row",
       (" Actions ": Element).style(Style.Bold),
       "   d           Send SIGTERM",
-      "   k           Send SIGKILL (confirm)",
-      "   t           Request thread dump",
-      "   h           Request heap dump",
+      "   x           Send SIGKILL (confirm)",
+      "   t           Request thread dump (wip)",
+      "   h           Request heap dump (wip)",
       (" Sort ": Element).style(Style.Bold),
       "   F           Cycle sort column",
       (" Misc ": Element).style(Style.Bold),
