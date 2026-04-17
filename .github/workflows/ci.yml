@@ -69,7 +69,27 @@ jobs:
         with:
           power: true
 
-      - name: Publish
+      - name: Check if HEAD is tagged
+        id: tagged
+        if: github.ref == 'refs/heads/main'
+        run: |
+          if git tag --points-at HEAD | grep -q .; then
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            echo "HEAD is tagged, skipping snapshot publish (tag workflow will handle it)"
+          fi
+
+      - name: Publish snapshot
+        if: github.ref == 'refs/heads/main' && steps.tagged.outputs.skipped != 'true'
+        run: |
+          scala-cli config publish.credentials central.sonatype.com env:SONATYPE_USERNAME env:SONATYPE_PASSWORD
+          scala-cli config publish.credentials ossrh-staging-api.central.sonatype.com env:SONATYPE_USERNAME env:SONATYPE_PASSWORD
+          scala-cli publish . --signer none
+        env:
+          SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           scala-cli config publish.credentials central.sonatype.com env:SONATYPE_USERNAME env:SONATYPE_PASSWORD
           scala-cli config publish.credentials ossrh-staging-api.central.sonatype.com env:SONATYPE_USERNAME env:SONATYPE_PASSWORD
