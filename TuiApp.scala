@@ -359,8 +359,9 @@ class TuiApp(debug: Boolean, processActions: ProcessActions) extends LayoutzApp[
     } else {
       val emptyTitleText = s" SCALA MONITOR \u2500\u2500 0 $processWord \u2500\u2500 0 kB "
       val emptyAvail = math.max(1, availWidth - brandW)
-      val emptyDisplayTitle = if (emptyTitleText.length > emptyAvail) emptyTitleText.take(emptyAvail - 1) + "\u2026"
-      else emptyTitleText + (" " * (emptyAvail - emptyTitleText.length))
+      val emptyTitleRealLen = realLength(emptyTitleText)
+      val emptyDisplayTitle = if (emptyTitleRealLen > emptyAvail) emptyTitleText.take(emptyAvail - 1) + "\u2026"
+      else emptyTitleText + (" " * (emptyAvail - emptyTitleRealLen))
       val emptyTitleRow = rowTight(
         (emptyDisplayTitle: Element).color(Color.Cyan).style(Style.Bold),
         (brandText: Element).color(Color.BrightBlack)
