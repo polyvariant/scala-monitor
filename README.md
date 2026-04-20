@@ -4,6 +4,13 @@ CLI utility that discovers running Scala/JVM-related processes (sbt, bloop, meta
 
 ## Install
 
+```sh
+cs install --contrib scala-monitor
+```
+
+<details>
+<summary>Alternative installation methods</summary>
+
 **Linux (x86_64 / aarch64):**
 ```sh
 ARCH=$(uname -m | sed 's/arm64/aarch64/') && curl -sL https://github.com/polyvariant/scala-monitor/releases/latest/download/scala-monitor-${ARCH}-pc-linux > scala-monitor && chmod +x scala-monitor && ./scala-monitor
@@ -14,18 +21,18 @@ ARCH=$(uname -m | sed 's/arm64/aarch64/') && curl -sL https://github.com/polyvar
 ARCH=$(uname -m | sed 's/arm64/aarch64/') && curl -sL https://github.com/polyvariant/scala-monitor/releases/latest/download/scala-monitor-${ARCH}-apple-darwin > scala-monitor && chmod +x scala-monitor && ./scala-monitor
 ```
 
-## Build from source
-
+**Build from source:**
 ```sh
 scala-cli --power package . -o scala-monitor
 ```
-
 Produces a `scala-monitor` native binary.
+
+</details>
 
 ## Run
 
 ```sh
-./scala-monitor
+scala-monitor
 ```
 
 For a `top`-like live view that continuously refreshes the output every 0.1s, run under `watch`:
@@ -33,6 +40,8 @@ For a `top`-like live view that continuously refreshes the output every 0.1s, ru
 ```sh
 watch -n 0.1 scala-monitor
 ```
+
+> **Experimental:** `scala-monitor --tui` launches a built-in terminal UI for interactive monitoring.
 
 ## Help
 
