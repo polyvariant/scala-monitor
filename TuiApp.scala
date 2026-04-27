@@ -410,7 +410,7 @@ class TuiApp(debug: Debug, processActions: ProcessActions) extends LayoutzApp[Tu
       "   t           Request thread dump (wip)",
       "   h           Request heap dump (wip)",
       (" Sort ": Element).style(Style.Bold),
-      "   F           Cycle sort column",
+      "   f           Cycle sort column",
       (" Misc ": Element).style(Style.Bold),
       "   ?           Toggle this help",
       "   q           Quit"
