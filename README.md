@@ -120,3 +120,9 @@ $ ./scala-monitor -f type=metals -o pid
 
 - Linux or macOS
 - For building from source: [Scala CLI](https://scala-cli.virtuslab.org/) with Scala Native support
+
+## Debugging
+
+If `scala-monitor` shows too few processes, you can run `./scripts/process-list-debug.sh` script that will check active processes with `jps` and `ps`.
+If it shows more processes than `scala-monitor`, please raise an issue in this repository with the output of that script.
+
