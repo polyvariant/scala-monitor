@@ -24,7 +24,7 @@ class TuiStateTest extends munit.FunSuite {
   )
 
   private def updateState(msg: TuiMsg, state: TuiState = initialState): TuiState =
-    (new TuiApp(false, ProcessActionsStub)).update(msg, state)._1
+    (new TuiApp(Debug.noop, ProcessActionsStub)).update(msg, state)._1
 
   test("MoveUp at top stays at top") {
     val result = updateState(MoveUp)
@@ -129,7 +129,7 @@ class TuiStateTest extends munit.FunSuite {
   }
 
   test("Quit returns exit command") {
-    val (_, cmd) = (new TuiApp(false, ProcessActionsStub)).update(Quit, initialState)
+    val (_, cmd) = (new TuiApp(Debug.noop, ProcessActionsStub)).update(Quit, initialState)
     assertEquals(cmd, Cmd.exit)
   }
 

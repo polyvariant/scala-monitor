@@ -81,7 +81,7 @@ object TuiApp {
     if (sorting == SortDirection.Ascending) sorted else sorted.reverse
   }
 
-  def run(debug: Boolean): Unit = {
+  def run(debug: Debug): Unit = {
     val processActions = ProcessActionsLive(scala.scalanative.posix.signal)
     val app = new TuiApp(debug, processActions)
     app.run(
@@ -95,7 +95,7 @@ object TuiApp {
   }
 }
 
-class TuiApp(debug: Boolean, processActions: ProcessActions) extends LayoutzApp[TuiState, TuiMsg] {
+class TuiApp(debug: Debug, processActions: ProcessActions) extends LayoutzApp[TuiState, TuiMsg] {
 
   def init: (TuiState, Cmd[TuiMsg]) = {
     val procs = ScalaMonitor.discover(debug)

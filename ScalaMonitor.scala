@@ -25,13 +25,20 @@ object ScalaMonitor {
     filter: Seq[String] = Seq.empty,
     @arg(short = 'd', doc = "Enable verbose debug logging to stderr")
     debug: Flag = Flag(),
+    @arg(short = 'l', doc = "Enable debug logging and write to this file instead of stderr")
+    debugLog: Option[String] = None,
     @arg(short = 'w', doc = "Interactive TUI mode (like top)")
     tui: Flag = Flag()
   ): Unit = {
+    val dbg = debugLog match {
+      case Some(path) => Debug.toFile(path)
+      case None if debug.value => Debug.stderr
+      case None => Debug.noop
+    }
     if (tui.value) {
-      TuiApp.run(debug.value)
+      TuiApp.run(dbg)
     } else {
-      val processes = discover(debug.value)
+      val processes = discover(dbg)
       val (filtered, warnings) = applyFilters(processes, filter.toList)
       warnings.foreach(w => System.err.println(s"Warning: $w"))
       if (filtered.isEmpty) println("No Scala-related processes found.")
@@ -45,15 +52,14 @@ object ScalaMonitor {
   def main(args: Array[String]): Unit =
     mainargs.ParserForMethods(this).runOrExit(args.toIndexedSeq)
 
-  def discover(debug: Boolean): List[ScalaProcess] = {
-    val dbg = new Debug(debug)
+  def discover(debug: Debug): List[ScalaProcess] = {
     val selfPid = unistd.getpid()
-    dbg.log(s"Discovering processes (selfPid=$selfPid)")
+    debug.log(s"Discovering processes (selfPid=$selfPid)")
     val probe: PlatformProbe =
-      if (LinktimeInfo.isMac) new MacOsProbe(dbg)
-      else if (LinktimeInfo.isLinux) new LinuxProbe(dbg)
+      if (LinktimeInfo.isMac) new MacOsProbe(debug)
+      else if (LinktimeInfo.isLinux) new LinuxProbe(debug)
       else {
-        dbg.log("Unknown platform — neither macOS nor Linux, returning empty")
+        debug.log("Unknown platform — neither macOS nor Linux, returning empty")
         return Nil
       }
     probe.discover(selfPid)
