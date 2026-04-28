@@ -375,7 +375,7 @@ class TuiApp(debug: Debug, processActions: ProcessActions) extends LayoutzApp[Tu
       layout(emptyTitleRow, box("")(emptyMsg).border(Border.Round))
     }
 
-    val footerText = " \u2191\u2193 kj nav  d term  x kill  t threads  h heap  F sort  ? help  q quit"
+    val footerText = " \u2191\u2193 kj nav  d term  x kill  t threads  h heap  f sort  ? help  q quit"
     val footer = (footerText: Element).color(Color.BrightBlack)
 
     val statusFlash = state.statusMessage.map { msg =>
@@ -410,7 +410,7 @@ class TuiApp(debug: Debug, processActions: ProcessActions) extends LayoutzApp[Tu
       "   t           Request thread dump (wip)",
       "   h           Request heap dump (wip)",
       (" Sort ": Element).style(Style.Bold),
-      "   F           Cycle sort column",
+      "   f           Cycle sort column",
       (" Misc ": Element).style(Style.Bold),
       "   ?           Toggle this help",
       "   q           Quit"
