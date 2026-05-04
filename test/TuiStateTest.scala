@@ -5,9 +5,9 @@ import layoutz._
 class TuiStateTest extends munit.FunSuite {
 
   val sampleProcesses = List(
-    ScalaProcess(100, "sbt", 2048000L, Some(0L), 55, 7.3, "~/project"),
-    ScalaProcess(200, "Bloop", 157000L, Some(0L), 35, 0.5, "~/.local/bloop"),
-    ScalaProcess(300, "Metals", 698000L, None, 58, 2.2, "~/scala-monitor")
+    ScalaProcess(100, 1, "sbt", 2048000L, Some(0L), 55, 7.3, "~/project"),
+    ScalaProcess(200, 1, "Bloop", 157000L, Some(0L), 35, 0.5, "~/.local/bloop"),
+    ScalaProcess(300, 1, "Metals", 698000L, None, 58, 2.2, "~/scala-monitor")
   )
 
   val initialState = TuiState(

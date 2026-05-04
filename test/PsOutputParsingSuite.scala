@@ -53,21 +53,21 @@ class PsOutputParsingSuite extends munit.FunSuite {
   }
 
   test("parses macOS ps lines with comma decimal separator") {
-    val lines = List(" 1531  0,5 184288 /nix/store/zulu/bin/java bloop.BloopServer")
+    val lines = List(" 1531  1  0,5 184288 /nix/store/zulu/bin/java bloop.BloopServer")
     val results = MacOsProbe.parsePsLines(lines, selfPid = -1, debug = Debug.noop, cwdResolver = noCwd)
     assertEquals(results.size, 1)
     assertEquals(results.head.memPercent, 0.5)
   }
 
   test("parses macOS ps lines with dot decimal separator") {
-    val lines = List(" 1531  0.5 184288 /nix/store/zulu/bin/java bloop.BloopServer")
+    val lines = List(" 1531  1  0.5 184288 /nix/store/zulu/bin/java bloop.BloopServer")
     val results = MacOsProbe.parsePsLines(lines, selfPid = -1, debug = Debug.noop, cwdResolver = noCwd)
     assertEquals(results.size, 1)
     assertEquals(results.head.memPercent, 0.5)
   }
 
   test("excludes process matching selfPid") {
-    val lines = List(" 1531  0,5 184288 /nix/store/zulu/bin/java bloop.BloopServer")
+    val lines = List(" 1531  1  0,5 184288 /nix/store/zulu/bin/java bloop.BloopServer")
     val results = MacOsProbe.parsePsLines(lines, selfPid = 1531, debug = Debug.noop, cwdResolver = noCwd)
     assert(results.isEmpty, "Process matching selfPid should be excluded")
   }
@@ -78,7 +78,7 @@ class PsOutputParsingSuite extends munit.FunSuite {
   }
 
   test("skips malformed lines (too few fields)") {
-    val lines = List(" 1531  0,5", "badline", " 2000  0.3  65536 /usr/bin/java -cp scala-library.jar scala.tools.nsc.Main")
+    val lines = List(" 1531  0,5", "badline", " 2000  1  0.3  65536 /usr/bin/java -cp scala-library.jar scala.tools.nsc.Main")
     val results = MacOsProbe.parsePsLines(lines, selfPid = -1, debug = Debug.noop, cwdResolver = noCwd)
     assertEquals(results.size, 1)
     assertEquals(results.head.pid, 2000)
@@ -86,8 +86,8 @@ class PsOutputParsingSuite extends munit.FunSuite {
 
   test("classifies Metals and sbt from cmdline patterns") {
     val lines = List(
-      " 1001  1.0 100000 /usr/bin/java scala.meta.metals.Main",
-      " 1002  2.0 200000 /usr/bin/java xsbt.boot.Boot project"
+      " 1001  1  1.0 100000 /usr/bin/java scala.meta.metals.Main",
+      " 1002  1  2.0 200000 /usr/bin/java xsbt.boot.Boot project"
     )
     val results = MacOsProbe.parsePsLines(lines, selfPid = -1, debug = Debug.noop, cwdResolver = noCwd)
     assertEquals(results.size, 2)

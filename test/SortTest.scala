@@ -3,9 +3,9 @@ package org.polyvariant
 class SortTest extends munit.FunSuite {
 
   val procs = List(
-    ScalaProcess(300, "sbt", 2048000L, Some(0L), 55, 7.3, "~/a"),
-    ScalaProcess(100, "Metals", 698000L, None, 58, 2.2, "~/b"),
-    ScalaProcess(200, "Bloop", 157000L, Some(0L), 35, 0.5, "~/c")
+    ScalaProcess(300, 1, "sbt", 2048000L, Some(0L), 55, 7.3, "~/a"),
+    ScalaProcess(100, 1, "Metals", 698000L, None, 58, 2.2, "~/b"),
+    ScalaProcess(200, 1, "Bloop", 157000L, Some(0L), 35, 0.5, "~/c")
   )
 
   test("sort by PID ascending") {

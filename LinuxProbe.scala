@@ -39,6 +39,7 @@ class LinuxProbe(debug: Debug) extends PlatformProbe {
         val rss = statusLong(status, "VmRSS")
         ScalaProcess(
           pid = pid,
+          ppid = statusInt(status, "PPid"),
           kind = ScalaMonitor.classify(cmdline, debug),
           ramKb = rss,
           swapKb = Some(statusLong(status, "VmSwap")),
@@ -46,7 +47,7 @@ class LinuxProbe(debug: Debug) extends PlatformProbe {
           memPercent = rss.toDouble / totalRamKb * 100.0,
           projectPath = readCwd(pid).map(ScalaMonitor.shortenPath).getOrElse("-")
         )
-    }.sortBy(p => -p.ramKb)
+    }
 
     debug.log(s"Discovery summary: ${candidates.size} scanned, ${withCmdline.size} with cmdline, ${matched.size} passed filter, $dropped dropped (status), ${results.size} in output")
 

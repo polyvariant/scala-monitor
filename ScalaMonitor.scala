@@ -62,19 +62,22 @@ object ScalaMonitor {
         debug.log("Unknown platform — neither macOS nor Linux, returning empty")
         return Nil
       }
-    probe.discover(selfPid)
+    probe.discover(selfPid).sortBy(p => (p.projectPath, p.pid))
   }
 
   private def renderTable(processes: List[ScalaProcess]): String = {
     val totalRam = processes.map(_.ramKb).sum
-    val line = "\u2500" * 130
-    val header = "  %-8s %-12s %10s %10s %6s %5s  %-50s".format(
-      "PID", "TYPE", "RAM", "SWAP", "MEM%", "THR", "PROJECT"
+    val childCounts = processes.groupBy(_.ppid).map { case (ppid, children) => ppid -> children.size }
+    val line = "\u2500" * 150
+    val header = "  %-8s %-6s %-4s %-12s %10s %10s %6s %5s  %-50s".format(
+      "PID", "PPID", "CHD", "TYPE", "RAM", "SWAP", "MEM%", "THR", "PROJECT"
     )
     val rows = processes.map { p =>
       val swapStr = p.swapKb.map(formatMemory).getOrElse("n/a")
-      "  %-8d %-12s %10s %10s %5.1f%% %5d  %-50s".format(
-        p.pid, p.kind, formatMemory(p.ramKb),
+      val childCount = childCounts.getOrElse(p.pid, 0)
+      val kindDisplay = if (childCount > 0) p.kind + " \u00BB" else p.kind
+      "  %-8d %-6d %-4d %-12s %10s %10s %5.1f%% %5d  %-50s".format(
+        p.pid, p.ppid, childCount, kindDisplay, formatMemory(p.ramKb),
         swapStr, p.memPercent, p.threads, p.projectPath
       )
     }

@@ -5,8 +5,8 @@ import layoutz.realLength
 class TuiViewTest extends munit.FunSuite with SnapshotTest {
 
   val sampleProcesses = List(
-    ScalaProcess(100, "sbt", 2048000L, Some(0L), 55, 7.3, "~/project"),
-    ScalaProcess(200, "Bloop", 157000L, None, 35, 0.5, "~/.local/bloop")
+    ScalaProcess(100, 1, "sbt", 2048000L, Some(0L), 55, 7.3, "~/project"),
+    ScalaProcess(200, 1, "Bloop", 157000L, None, 35, 0.5, "~/.local/bloop")
   )
 
   val baseState = TuiState(
@@ -20,7 +20,7 @@ class TuiViewTest extends munit.FunSuite with SnapshotTest {
     confirmTargetPid = None,
     tickFrame = 0,
     showHelp = false,
-    termWidth = 80
+    termWidth = 100
   )
 
   private def viewRender(state: TuiState): String =

@@ -99,13 +99,13 @@ class TuiApp(debug: Debug, processActions: ProcessActions) extends LayoutzApp[Tu
 
   def init: (TuiState, Cmd[TuiMsg]) = {
     val procs = ScalaMonitor.discover(debug)
-    val sorted = TuiApp.sort(procs, SortColumn.Ram, SortDirection.Descending)
+    val sorted = TuiApp.sort(procs, SortColumn.Project, SortDirection.Ascending)
     val tw = math.min(210, SttyTerminal.create().map(_.terminalWidth()).getOrElse(80))
     val state = TuiState(
       processes = sorted,
       selectedIndex = 0,
-      sortColumn = SortColumn.Ram,
-      sortDirection = SortDirection.Descending,
+      sortColumn = SortColumn.Project,
+      sortDirection = SortDirection.Ascending,
       statusMessage = None,
       statusMessageExpiresAt = 0L,
       confirmation = ConfirmationKind.None,
@@ -289,16 +289,22 @@ class TuiApp(debug: Debug, processActions: ProcessActions) extends LayoutzApp[Tu
     val brandW = brandText.length
 
     val allProcs = state.processes
+    val childCounts = allProcs.groupBy(_.ppid).map { case (ppid, children) => ppid -> children.size }
     val pidW = math.max(3, allProcs.map(_.pid.toString.length).maxOption.getOrElse(0))
-    val kindW = math.max(16, allProcs.map(_.kind.length).maxOption.getOrElse(0))
+    val ppidW = math.max(4, allProcs.map(_.ppid.toString.length).maxOption.getOrElse(0))
+    val chdW = 3
+    val kindW = math.max(16, allProcs.map { p =>
+      val cc = childCounts.getOrElse(p.pid, 0)
+      realLength(if (cc > 0) p.kind + " \u00BB" else p.kind)
+    }.maxOption.getOrElse(0))
     val rssW = math.max(3, allProcs.map(p => ScalaMonitor.formatMemory(p.ramKb).length).maxOption.getOrElse(0))
     val swapW = math.max(4, allProcs.map(p => p.swapKb.map(ScalaMonitor.formatMemory).getOrElse("n/a").length).maxOption.getOrElse(0))
     val memW = math.max(4, allProcs.map(p => f"${p.memPercent}%.1f%%".length).maxOption.getOrElse(0))
     val thrW = math.max(3, allProcs.map(_.threads.toString.length).maxOption.getOrElse(0))
-    val nonProjectContentW = pidW + kindW + rssW + swapW + memW + thrW
+    val nonProjectContentW = ppidW + chdW + pidW + kindW + rssW + swapW + memW + thrW
     // layoutz table: 1 space padding each side per column, │ separators
-    // 7 columns: 7*2 padding + 8 │ chars (left/right borders + inter-column)
-    val tableOverhead = 7 * 2 + 8
+    // 9 columns: 9*2 padding + 10 │ chars (left/right borders + inter-column)
+    val tableOverhead = 9 * 2 + 10
     val availWidth = state.termWidth - 1 // reserve 1 column
     val projectMaxWidth = math.max(7, availWidth - nonProjectContentW - tableOverhead)
     val tableWidth = nonProjectContentW + projectMaxWidth + tableOverhead
@@ -313,10 +319,12 @@ class TuiApp(debug: Debug, processActions: ProcessActions) extends LayoutzApp[Tu
     )
 
     def padRight(s: String, w: Int): String =
-      if (s.length >= w) s else s + (" " * (w - s.length))
+      if (realLength(s) >= w) s else s + (" " * (w - realLength(s)))
 
     val tableHeadersE: Seq[Element] = List(
       padRight("PID", pidW),
+      padRight("PPID", ppidW),
+      padRight("CHD", chdW),
       padRight("TYPE", kindW),
       padRight("RSS", rssW),
       padRight("SWAP", swapW),
@@ -345,9 +353,13 @@ class TuiApp(debug: Debug, processActions: ProcessActions) extends LayoutzApp[Tu
         p.projectPath.take(projectMaxWidth - 3) + "..."
       else
         p.projectPath + (" " * (projectMaxWidth - p.projectPath.length))
+      val childCount = childCounts.getOrElse(p.pid, 0)
+      val kindDisplay = if (childCount > 0) p.kind + " \u00BB" else p.kind
       Seq(
         bgWhite(padRight(p.pid.toString, pidW)),
-        bg(padRight(p.kind, kindW)),
+        bgWhite(padRight(p.ppid.toString, ppidW)),
+        bg(padRight(childCount.toString, chdW)),
+        bg(padRight(kindDisplay, kindW)),
         bg((padRight(ScalaMonitor.formatMemory(p.ramKb), rssW): Element).color(rssColor)),
         bg(padRight(swapStr, swapW)),
         bg((padRight(f"${p.memPercent}%.1f%%", memW): Element).color(memColor)),
