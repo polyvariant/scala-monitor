@@ -100,6 +100,7 @@ object ScalaMonitor {
   def extractMainClass(cmdline: String): Option[String] = {
     val tokens = cmdline.split("\\s+").drop(1)
     tokens.find { t =>
+      t.length > 1 &&
       t.contains(".") &&
       !t.startsWith("-") &&
       !t.contains("/") &&
@@ -108,11 +109,23 @@ object ScalaMonitor {
     }
   }
 
+  def extractJarName(cmdline: String): Option[String] = {
+    val jarFlag = raw"""-jar\s+(\S+)""".r
+    jarFlag.findFirstMatchIn(cmdline).map(_.group(1)).flatMap { path =>
+      val name = path.lastIndexOf('/') match {
+        case -1 => path
+        case i  => path.substring(i + 1)
+      }
+      if (name.endsWith(".jar")) Some(name.stripSuffix(".jar")) else Some(name)
+    }
+  }
+
   def classify(cmdline: String, debug: Debug): String = {
     val result = classifications
       .find(c => cmdline.contains(c.pattern))
       .map(_.name)
       .orElse(extractMainClass(cmdline))
+      .orElse(extractJarName(cmdline))
       .getOrElse("Scala/JVM")
     debug.log(s"  classify('$cmdline') → '$result'")
     result
@@ -208,6 +221,7 @@ object ScalaMonitor {
     Classification("io.getcoursier.cli.launcher",   "coursier"),
     Classification("mill.main.Main",                "mill"),
     Classification("mill.Main",                     "mill"),
+    Classification("metals-mcp",                   "Metals MCP"),
   )
 
   private val scalaIndicators: List[String] = List(
