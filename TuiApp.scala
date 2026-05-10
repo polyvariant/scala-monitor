@@ -31,7 +31,8 @@ case class TuiState(
   confirmTargetPid: Option[Int],
   tickFrame: Int,
   showHelp: Boolean = false,
-  termWidth: Int = 80
+  termWidth: Int = 80,
+  termHeight: Int = 24
 )
 
 sealed trait TuiMsg
@@ -83,7 +84,8 @@ object TuiApp {
 
   def run(debug: Debug): Unit = {
     val processActions = ProcessActionsLive(scala.scalanative.posix.signal)
-    val app = new TuiApp(debug, processActions)
+    val terminalSize = SttyTerminalSize
+    val app = new TuiApp(debug, processActions, terminalSize)
     app.run(
       tickIntervalMs = 100,
       renderIntervalMs = 50,
@@ -95,12 +97,12 @@ object TuiApp {
   }
 }
 
-class TuiApp(debug: Debug, processActions: ProcessActions) extends LayoutzApp[TuiState, TuiMsg] {
+class TuiApp(debug: Debug, processActions: ProcessActions, terminalSize: TerminalSize) extends LayoutzApp[TuiState, TuiMsg] {
 
   def init: (TuiState, Cmd[TuiMsg]) = {
     val procs = ScalaMonitor.discover(debug)
     val sorted = TuiApp.sort(procs, SortColumn.Project, SortDirection.Ascending)
-    val tw = math.min(210, SttyTerminal.create().map(_.terminalWidth()).getOrElse(80))
+    val (tw, th) = terminalSize.query()
     val state = TuiState(
       processes = sorted,
       selectedIndex = 0,
@@ -112,7 +114,8 @@ class TuiApp(debug: Debug, processActions: ProcessActions) extends LayoutzApp[Tu
       confirmTargetPid = None,
       tickFrame = 0,
       showHelp = false,
-      termWidth = tw
+      termWidth = tw,
+      termHeight = th
     )
     (state, Cmd.none)
   }
@@ -222,12 +225,18 @@ class TuiApp(debug: Debug, processActions: ProcessActions) extends LayoutzApp[Tu
 
     case TickFrame =>
       val now = System.currentTimeMillis()
-      val cleared = if (state.statusMessageExpiresAt > 0 && now >= state.statusMessageExpiresAt) {
+      val (newWidth, newHeight) = terminalSize.query()
+      val withClearedStatus = if (state.statusMessageExpiresAt > 0 && now >= state.statusMessageExpiresAt) {
         state.copy(statusMessage = None, statusMessageExpiresAt = 0L)
       } else {
         state
       }
-      cleared.copy(tickFrame = cleared.tickFrame + 1)
+      val withResize = if (newWidth != withClearedStatus.termWidth || newHeight != withClearedStatus.termHeight) {
+        withClearedStatus.copy(termWidth = newWidth, termHeight = newHeight)
+      } else {
+        withClearedStatus
+      }
+      withResize.copy(tickFrame = withResize.tickFrame + 1)
 
     case ToggleHelp =>
       state.copy(showHelp = !state.showHelp)
@@ -429,7 +438,7 @@ class TuiApp(debug: Debug, processActions: ProcessActions) extends LayoutzApp[Tu
     )
     val helpBox = box("")(helpContent).border(Border.Round)
 
-    if (state.showHelp) {
+    val mainView = if (state.showHelp) {
       layout(helpBox, footer)
     } else if (confirmationOverlay.isDefined) {
       layout(tableElement, confirmationOverlay.get, footer)
@@ -438,6 +447,14 @@ class TuiApp(debug: Debug, processActions: ProcessActions) extends LayoutzApp[Tu
         case Some(flash) => layout(tableElement, layout(footer, flash))
         case None        => layout(tableElement, footer)
       }
+    }
+
+    {
+      val rendered = mainView.render
+      val lineCount = rendered.split("\n", -1).length
+      val paddingNeeded = math.max(0, state.termHeight - lineCount)
+      val paddingElements: Seq[Element] = List.fill(paddingNeeded)("")
+      layout((mainView +: paddingElements)*)
     }
   }
 }
