@@ -84,7 +84,7 @@ object TuiApp {
 
   def run(debug: Debug): Unit = {
     val processActions = ProcessActionsLive(scala.scalanative.posix.signal)
-    val terminalSize = SttyTerminalSize
+    val terminalSize = TerminalSize(debug)
     val app = new TuiApp(debug, processActions, terminalSize)
     app.run(
       tickIntervalMs = 100,
@@ -453,8 +453,8 @@ class TuiApp(debug: Debug, processActions: ProcessActions, terminalSize: Termina
       val rendered = mainView.render
       val lineCount = rendered.split("\n", -1).length
       val paddingNeeded = math.max(0, state.termHeight - lineCount)
-      val paddingElements: Seq[Element] = List.fill(paddingNeeded)("")
-      layout((mainView +: paddingElements)*)
+      val padding = "\n" * paddingNeeded
+      Text(rendered + padding)
     }
   }
 }

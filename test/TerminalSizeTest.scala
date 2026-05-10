@@ -2,50 +2,28 @@ package org.polyvariant
 
 class TerminalSizeTest extends munit.FunSuite {
 
-  // Pure function mirroring SttyTerminalSize parsing logic
-  private def parseSttyOutput(output: String): (Int, Int) = {
-    val DefaultSize = (80, 24)
-    val MaxWidth = 210
-    val MinWidth = 80
-    val MinHeight = 1
-    val parts = output.trim.split("\\s+")
-    if (parts.length == 2) {
-      val rows = parts(0).toInt
-      val cols = parts(1).toInt
-      if (rows > 0 && cols > 0) {
-        val width = math.max(MinWidth, math.min(MaxWidth, cols))
-        val height = math.max(MinHeight, rows)
-        (width, height)
-      } else {
-        DefaultSize
-      }
-    } else {
-      DefaultSize
-    }
+  test("parseOutput: valid input returns correct dimensions") {
+    assertEquals(SttyTerminalSize.parseOutput("50 200"), (200, 50))
   }
 
-  test("parseSttyOutput: valid input returns correct dimensions") {
-    assertEquals(parseSttyOutput("50 200"), (200, 50))
+  test("parseOutput: width capped at 210") {
+    assertEquals(SttyTerminalSize.parseOutput("50 300"), (210, 50))
   }
 
-  test("parseSttyOutput: width capped at 210") {
-    assertEquals(parseSttyOutput("50 300"), (210, 50))
+  test("parseOutput: width floored at 80") {
+    assertEquals(SttyTerminalSize.parseOutput("50 40"), (80, 50))
   }
 
-  test("parseSttyOutput: width floored at 80") {
-    assertEquals(parseSttyOutput("50 40"), (80, 50))
+  test("parseOutput: garbage input returns default") {
+    assertEquals(SttyTerminalSize.parseOutput("garbage"), (80, 24))
   }
 
-  test("parseSttyOutput: garbage input returns default") {
-    assertEquals(parseSttyOutput("garbage"), (80, 24))
+  test("parseOutput: empty input returns default") {
+    assertEquals(SttyTerminalSize.parseOutput(""), (80, 24))
   }
 
-  test("parseSttyOutput: empty input returns default") {
-    assertEquals(parseSttyOutput(""), (80, 24))
-  }
-
-  test("parseSttyOutput: zero values return default") {
-    assertEquals(parseSttyOutput("0 0"), (80, 24))
+  test("parseOutput: zero values return default") {
+    assertEquals(SttyTerminalSize.parseOutput("0 0"), (80, 24))
   }
 
   test("FixedTerminalSize.query returns configured dimensions") {
@@ -58,20 +36,29 @@ class TerminalSizeTest extends munit.FunSuite {
     assertEquals(ts.query(), (80, 24))
   }
 
-  test("parseSttyOutput: height floored at 1") {
-    assertEquals(parseSttyOutput("1 100"), (100, 1))
+  test("parseOutput: height floored at 1") {
+    assertEquals(SttyTerminalSize.parseOutput("1 100"), (100, 1))
   }
 
-  test("parseSttyOutput: negative values return default") {
-    assertEquals(parseSttyOutput("-5 -10"), (80, 24))
+  test("parseOutput: negative values return default") {
+    assertEquals(SttyTerminalSize.parseOutput("-5 -10"), (80, 24))
   }
 
-  test("parseSttyOutput: single number returns default") {
-    assertEquals(parseSttyOutput("50"), (80, 24))
+  test("parseOutput: single number returns default") {
+    assertEquals(SttyTerminalSize.parseOutput("50"), (80, 24))
   }
 
-  test("parseSttyOutput: width exactly at boundaries") {
-    assertEquals(parseSttyOutput("30 210"), (210, 30))
-    assertEquals(parseSttyOutput("30 80"), (80, 30))
+  test("parseOutput: width exactly at boundaries") {
+    assertEquals(SttyTerminalSize.parseOutput("30 210"), (210, 30))
+    assertEquals(SttyTerminalSize.parseOutput("30 80"), (80, 30))
+  }
+
+  test("TerminalSize factory creates SttyTerminalSize") {
+    val ts = TerminalSize(Debug.noop)
+    // In test environment stty may not return valid output,
+    // but the factory should create a working instance
+    val result = ts.query()
+    assert(result._1 > 0, s"width should be positive, got ${result._1}")
+    assert(result._2 > 0, s"height should be positive, got ${result._2}")
   }
 }
