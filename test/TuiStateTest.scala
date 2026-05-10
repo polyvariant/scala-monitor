@@ -20,11 +20,12 @@ class TuiStateTest extends munit.FunSuite {
     confirmation = ConfirmationKind.None,
     confirmTargetPid = None,
     tickFrame = 0,
-    termWidth = 80
+    termWidth = 80,
+    termHeight = 24
   )
 
   private def updateState(msg: TuiMsg, state: TuiState = initialState): TuiState =
-    (new TuiApp(Debug.noop, ProcessActionsStub)).update(msg, state)._1
+    (new TuiApp(Debug.noop, ProcessActionsStub, FixedTerminalSize(80, 24))).update(msg, state)._1
 
   test("MoveUp at top stays at top") {
     val result = updateState(MoveUp)
@@ -129,7 +130,7 @@ class TuiStateTest extends munit.FunSuite {
   }
 
   test("Quit returns exit command") {
-    val (_, cmd) = (new TuiApp(Debug.noop, ProcessActionsStub)).update(Quit, initialState)
+    val (_, cmd) = (new TuiApp(Debug.noop, ProcessActionsStub, FixedTerminalSize(80, 24))).update(Quit, initialState)
     assertEquals(cmd, Cmd.exit)
   }
 
@@ -164,5 +165,26 @@ class TuiStateTest extends munit.FunSuite {
     val atBottom = initialState.copy(selectedIndex = 2)
     val result = updateState(JumpToLast, atBottom)
     assertEquals(result.selectedIndex, 2)
+  }
+
+  test("TickFrame updates dimensions when they change") {
+    val app = new TuiApp(Debug.noop, ProcessActionsStub, FixedTerminalSize(120, 30))
+    val (result, _) = app.update(TickFrame, initialState)
+    assertEquals(result.termWidth, 120)
+    assertEquals(result.termHeight, 30)
+  }
+
+  test("TickFrame preserves dimensions when unchanged") {
+    val app = new TuiApp(Debug.noop, ProcessActionsStub, FixedTerminalSize(80, 24))
+    val (result, _) = app.update(TickFrame, initialState)
+    assertEquals(result.termWidth, 80)
+    assertEquals(result.termHeight, 24)
+    assertEquals(result.tickFrame, 1)
+  }
+
+  test("TickFrame increments tickFrame even when dimensions change") {
+    val app = new TuiApp(Debug.noop, ProcessActionsStub, FixedTerminalSize(120, 30))
+    val (result, _) = app.update(TickFrame, initialState)
+    assertEquals(result.tickFrame, 1)
   }
 }

@@ -20,11 +20,12 @@ class TuiViewTest extends munit.FunSuite with SnapshotTest {
     confirmTargetPid = None,
     tickFrame = 0,
     showHelp = false,
-    termWidth = 100
+    termWidth = 100,
+    termHeight = 24
   )
 
   private def viewRender(state: TuiState): String =
-    (new TuiApp(Debug.noop, ProcessActionsStub)).view(state).render
+    (new TuiApp(Debug.noop, ProcessActionsStub, FixedTerminalSize(100, 24))).view(state).render
 
   test("view renders process table with data") {
     val rendered = viewRender(baseState)
@@ -116,5 +117,26 @@ class TuiViewTest extends munit.FunSuite with SnapshotTest {
       s"title width ($titleWidth) should match border width ($borderWidth), " +
       s"title line: '$titleVisible', border: '$borderVisible'")
     assert(titleVisible.endsWith("polyvariant.org"), "brand text should be at end of title row")
+  }
+
+  test("view output fills terminal height") {
+    val state = baseState.copy(termHeight = 50)
+    val rendered = viewRender(state)
+    val lineCount = rendered.split("\n", -1).length
+    assertEquals(lineCount, 50)
+  }
+
+  test("view output fills terminal height for help view") {
+    val state = baseState.copy(termHeight = 50, showHelp = true)
+    val rendered = viewRender(state)
+    val lineCount = rendered.split("\n", -1).length
+    assertEquals(lineCount, 50)
+  }
+
+  test("view output handles small terminal height") {
+    val state = baseState.copy(termHeight = 5)
+    val rendered = viewRender(state)
+    val lineCount = rendered.split("\n", -1).length
+    assert(lineCount >= 5, s"expected at least 5 lines but got $lineCount")
   }
 }
