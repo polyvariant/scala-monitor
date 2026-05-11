@@ -88,13 +88,43 @@ class TuiStateTest extends munit.FunSuite {
     assertEquals(result.statusMessage, None)
   }
 
-  test("RequestThreadDump sets status flash") {
+  test("RequestThreadDump enters confirmation mode") {
     val result = updateState(RequestThreadDump)
+    assertEquals(result.confirmation, ConfirmationKind.ThreadDump)
+    assertEquals(result.confirmTargetPid, Some(100))
+    assertEquals(result.confirmTargetKind, Some("sbt"))
+  }
+
+  test("RequestHeapDump enters confirmation mode") {
+    val result = updateState(RequestHeapDump)
+    assertEquals(result.confirmation, ConfirmationKind.HeapDump)
+    assertEquals(result.confirmTargetPid, Some(100))
+    assertEquals(result.confirmTargetKind, Some("sbt"))
+  }
+
+  test("ConfirmThreadDump executes dump and clears confirmation") {
+    val confirming = initialState.copy(
+      confirmation = ConfirmationKind.ThreadDump,
+      confirmTargetPid = Some(100),
+      confirmTargetKind = Some("sbt")
+    )
+    val result = updateState(ConfirmThreadDump, confirming)
+    assertEquals(result.confirmation, ConfirmationKind.None)
+    assertEquals(result.confirmTargetPid, None)
+    assertEquals(result.confirmTargetKind, None)
     assert(result.statusMessage.exists(_.contains("Thread dump")))
   }
 
-  test("RequestHeapDump sets status flash") {
-    val result = updateState(RequestHeapDump)
+  test("ConfirmHeapDump executes dump and clears confirmation") {
+    val confirming = initialState.copy(
+      confirmation = ConfirmationKind.HeapDump,
+      confirmTargetPid = Some(100),
+      confirmTargetKind = Some("sbt")
+    )
+    val result = updateState(ConfirmHeapDump, confirming)
+    assertEquals(result.confirmation, ConfirmationKind.None)
+    assertEquals(result.confirmTargetPid, None)
+    assertEquals(result.confirmTargetKind, None)
     assert(result.statusMessage.exists(_.contains("Heap dump")))
   }
 
