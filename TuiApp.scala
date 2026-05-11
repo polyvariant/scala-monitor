@@ -18,7 +18,7 @@ import layoutz.Key.PageDown
 
 enum SortColumn { case Pid, Kind, Ram, MemPercent, Project }
 
-enum ConfirmationKind { case Sigkill, None }
+enum ConfirmationKind { case Sigkill, ThreadDump, HeapDump, None }
 
 case class TuiState(
   processes: List[ScalaProcess],
@@ -29,6 +29,7 @@ case class TuiState(
   statusMessageExpiresAt: Long,
   confirmation: ConfirmationKind,
   confirmTargetPid: Option[Int],
+  confirmTargetKind: Option[String] = None,
   tickFrame: Int,
   showHelp: Boolean = false,
   termWidth: Int = 80,
@@ -48,6 +49,8 @@ case object ConfirmKill extends TuiMsg
 case object CancelConfirmation extends TuiMsg
 case object RequestThreadDump extends TuiMsg
 case object RequestHeapDump extends TuiMsg
+case object ConfirmThreadDump extends TuiMsg
+case object ConfirmHeapDump extends TuiMsg
 case class ActionCompleted(msg: String) extends TuiMsg
 case class ActionFailed(err: String) extends TuiMsg
 case object ClearStatus extends TuiMsg
@@ -82,8 +85,8 @@ object TuiApp {
     if (sorting == SortDirection.Ascending) sorted else sorted.reverse
   }
 
-  def run(debug: Debug): Unit = {
-    val processActions = ProcessActionsLive(scala.scalanative.posix.signal)
+  def run(debug: Debug, dumpsDir: String): Unit = {
+    val processActions = ProcessActionsLive(scala.scalanative.posix.signal, debug, dumpsDir)
     val terminalSize = TerminalSize(debug)
     val app = new TuiApp(debug, processActions, terminalSize)
     app.run(
@@ -162,7 +165,7 @@ class TuiApp(debug: Debug, processActions: ProcessActions, terminalSize: Termina
     case RequestSigkill =>
       state.processes.lift(state.selectedIndex) match {
         case Some(proc) =>
-          state.copy(confirmation = ConfirmationKind.Sigkill, confirmTargetPid = Some(proc.pid))
+          state.copy(confirmation = ConfirmationKind.Sigkill, confirmTargetPid = Some(proc.pid), confirmTargetKind = Some(proc.kind))
         case None => state
       }
 
@@ -176,42 +179,96 @@ class TuiApp(debug: Debug, processActions: ProcessActions, terminalSize: Termina
                 statusMessage = Some(msg),
                 statusMessageExpiresAt = System.currentTimeMillis() + 3000,
                 confirmation = ConfirmationKind.None,
-                confirmTargetPid = None
+                confirmTargetPid = None,
+                confirmTargetKind = None
               )
             case Left(err) =>
               state.copy(
                 statusMessage = Some("Error: " + err),
                 statusMessageExpiresAt = System.currentTimeMillis() + 5000,
                 confirmation = ConfirmationKind.None,
-                confirmTargetPid = None
+                confirmTargetPid = None,
+                confirmTargetKind = None
               )
           }
-        case None => state.copy(confirmation = ConfirmationKind.None, confirmTargetPid = None)
+        case None => state.copy(confirmation = ConfirmationKind.None, confirmTargetPid = None, confirmTargetKind = None)
       }
 
     case CancelConfirmation =>
-      state.copy(confirmation = ConfirmationKind.None, confirmTargetPid = None)
+      state.copy(confirmation = ConfirmationKind.None, confirmTargetPid = None, confirmTargetKind = None)
 
     case RequestThreadDump =>
       state.processes.lift(state.selectedIndex) match {
         case Some(proc) =>
-          val result = processActions.threadDump(proc.pid)
-          result match {
-            case Right(msg) => state.copy(statusMessage = Some(msg), statusMessageExpiresAt = System.currentTimeMillis() + 3000)
-            case Left(err)  => state.copy(statusMessage = Some("Error: " + err), statusMessageExpiresAt = System.currentTimeMillis() + 5000)
-          }
+          state.copy(
+            confirmation = ConfirmationKind.ThreadDump,
+            confirmTargetPid = Some(proc.pid),
+            confirmTargetKind = Some(proc.kind)
+          )
         case None => state
       }
 
     case RequestHeapDump =>
       state.processes.lift(state.selectedIndex) match {
         case Some(proc) =>
-          val result = processActions.heapDump(proc.pid)
-          result match {
-            case Right(msg) => state.copy(statusMessage = Some(msg), statusMessageExpiresAt = System.currentTimeMillis() + 3000)
-            case Left(err)  => state.copy(statusMessage = Some("Error: " + err), statusMessageExpiresAt = System.currentTimeMillis() + 5000)
-          }
+          state.copy(
+            confirmation = ConfirmationKind.HeapDump,
+            confirmTargetPid = Some(proc.pid),
+            confirmTargetKind = Some(proc.kind)
+          )
         case None => state
+      }
+
+    case ConfirmThreadDump =>
+      (state.confirmTargetPid, state.confirmTargetKind) match {
+        case (Some(pid), kindOpt) =>
+          val kind = kindOpt.getOrElse("")
+          val result = processActions.threadDump(pid, kind)
+          result match {
+            case Right(msg) =>
+              state.copy(
+                statusMessage = Some(msg),
+                statusMessageExpiresAt = System.currentTimeMillis() + 3000,
+                confirmation = ConfirmationKind.None,
+                confirmTargetPid = None,
+                confirmTargetKind = None
+              )
+            case Left(err) =>
+              state.copy(
+                statusMessage = Some("Error: " + err),
+                statusMessageExpiresAt = System.currentTimeMillis() + 5000,
+                confirmation = ConfirmationKind.None,
+                confirmTargetPid = None,
+                confirmTargetKind = None
+              )
+          }
+        case _ => state.copy(confirmation = ConfirmationKind.None, confirmTargetPid = None, confirmTargetKind = None)
+      }
+
+    case ConfirmHeapDump =>
+      (state.confirmTargetPid, state.confirmTargetKind) match {
+        case (Some(pid), kindOpt) =>
+          val kind = kindOpt.getOrElse("")
+          val result = processActions.heapDump(pid, kind)
+          result match {
+            case Right(msg) =>
+              state.copy(
+                statusMessage = Some(msg),
+                statusMessageExpiresAt = System.currentTimeMillis() + 3000,
+                confirmation = ConfirmationKind.None,
+                confirmTargetPid = None,
+                confirmTargetKind = None
+              )
+            case Left(err) =>
+              state.copy(
+                statusMessage = Some("Error: " + err),
+                statusMessageExpiresAt = System.currentTimeMillis() + 5000,
+                confirmation = ConfirmationKind.None,
+                confirmTargetPid = None,
+                confirmTargetKind = None
+              )
+          }
+        case _ => state.copy(confirmation = ConfirmationKind.None, confirmTargetPid = None, confirmTargetKind = None)
       }
 
     case ActionCompleted(msg) =>
@@ -259,7 +316,13 @@ class TuiApp(debug: Debug, processActions: ProcessActions, terminalSize: Termina
       Sub.time.everyMs(100L, TickFrame),
       Sub.onKeyPress { key =>
         if(confirming) key match {
-          case Key.Enter if confirming     => Some(ConfirmKill)
+          case Key.Enter if confirming     =>
+            state.confirmation match {
+              case ConfirmationKind.Sigkill     => Some(ConfirmKill)
+              case ConfirmationKind.ThreadDump  => Some(ConfirmThreadDump)
+              case ConfirmationKind.HeapDump    => Some(ConfirmHeapDump)
+              case ConfirmationKind.None        => None
+            }
           case Key.Escape if confirming    => Some(CancelConfirmation)
           case _ => None
         } else key match {
@@ -418,6 +481,30 @@ class TuiApp(debug: Debug, processActions: ProcessActions, terminalSize: Termina
               .border(Border.Round).color(Color.Red)
           }
         }
+      case ConfirmationKind.ThreadDump =>
+        state.confirmTargetPid.flatMap { pid =>
+          state.processes.find(_.pid == pid).map { proc =>
+            val kind = state.confirmTargetKind.getOrElse("")
+            val filename = DumpPaths.dumpFileName("thread", pid, kind, "txt")
+            val line1 = (s"  Thread dump ${proc.kind} (PID ${proc.pid})?": Element).style(Style.Bold)
+            val line2 = (s"  File: $filename": Element)
+            val line3 = ("  Enter confirm   Esc cancel": Element).style(Style.Bold)
+            box(s" Thread Dump \u2500\u2500 Esc to close ")(line1, line2, line3)
+              .border(Border.Round).color(Color.Yellow)
+          }
+        }
+      case ConfirmationKind.HeapDump =>
+        state.confirmTargetPid.flatMap { pid =>
+          state.processes.find(_.pid == pid).map { proc =>
+            val kind = state.confirmTargetKind.getOrElse("")
+            val filename = DumpPaths.dumpFileName("heap", pid, kind, "hprof")
+            val line1 = (s"  Heap dump ${proc.kind} (PID ${proc.pid})?": Element).style(Style.Bold)
+            val line2 = (s"  File: $filename": Element)
+            val line3 = ("  Enter confirm   Esc cancel": Element).style(Style.Bold)
+            box(s" Heap Dump \u2500\u2500 Esc to close ")(line1, line2, line3)
+              .border(Border.Round).color(Color.Yellow)
+          }
+        }
       case ConfirmationKind.None => None
     }
 
@@ -428,8 +515,8 @@ class TuiApp(debug: Debug, processActions: ProcessActions, terminalSize: Termina
       (" Actions ": Element).style(Style.Bold),
       "   d           Send SIGTERM",
       "   x           Send SIGKILL (confirm)",
-      "   t           Request thread dump (wip)",
-      "   h           Request heap dump (wip)",
+      "   t           Request thread dump (confirm)",
+      "   h           Request heap dump (confirm)",
       (" Sort ": Element).style(Style.Bold),
       "   f           Cycle sort column",
       (" Misc ": Element).style(Style.Bold),

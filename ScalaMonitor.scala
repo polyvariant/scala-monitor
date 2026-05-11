@@ -28,7 +28,9 @@ object ScalaMonitor {
     @arg(short = 'l', doc = "Enable debug logging and write to this file instead of stderr")
     debugLog: Option[String] = None,
     @arg(short = 'w', doc = "Interactive TUI mode (like top)")
-    tui: Flag = Flag()
+    tui: Flag = Flag(),
+    @arg(short = 'D', doc = "Directory for thread/heap dump files (default: $XDG_CACHE_HOME/scala-monitor/dumps)")
+    dumpsDir: Option[String] = None
   ): Unit = {
     val dbg = debugLog match {
       case Some(path) => Debug.toFile(path)
@@ -36,7 +38,7 @@ object ScalaMonitor {
       case None => Debug.noop
     }
     if (tui.value) {
-      TuiApp.run(dbg)
+      TuiApp.run(dbg, DumpPaths.resolveDumpsDir(dumpsDir))
     } else {
       val processes = discover(dbg)
       val (filtered, warnings) = applyFilters(processes, filter.toList)
