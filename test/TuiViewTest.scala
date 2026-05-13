@@ -1,7 +1,5 @@
 package org.polyvariant
 
-import layoutz.realLength
-
 class TuiViewTest extends munit.FunSuite with SnapshotTest {
 
   val sampleProcesses = List(
@@ -111,32 +109,32 @@ class TuiViewTest extends munit.FunSuite with SnapshotTest {
     val stripAnsi = "\u001b\\[[0-9;]*m".r
     val titleVisible = stripAnsi.replaceAllIn(titleLine, "")
     val borderVisible = stripAnsi.replaceAllIn(borderLine, "")
-    val titleWidth = realLength(titleLine)
-    val borderWidth = realLength(borderLine)
+    val titleWidth = titleVisible.length
+    val borderWidth = borderVisible.length
     assert(titleWidth == borderWidth,
       s"title width ($titleWidth) should match border width ($borderWidth), " +
       s"title line: '$titleVisible', border: '$borderVisible'")
     assert(titleVisible.endsWith("polyvariant.org"), "brand text should be at end of title row")
   }
 
-  test("view output fills terminal height") {
+  test("view output fills terminal height minus one to avoid scroll") {
     val state = baseState.copy(termHeight = 50)
     val rendered = viewRender(state)
     val lineCount = rendered.split("\n", -1).length
-    assertEquals(lineCount, 50)
+    assertEquals(lineCount, 49)
   }
 
-  test("view output fills terminal height for help view") {
+  test("view output fills terminal height minus one for help view") {
     val state = baseState.copy(termHeight = 50, showHelp = true)
     val rendered = viewRender(state)
     val lineCount = rendered.split("\n", -1).length
-    assertEquals(lineCount, 50)
+    assertEquals(lineCount, 49)
   }
 
   test("view output handles small terminal height") {
     val state = baseState.copy(termHeight = 5)
     val rendered = viewRender(state)
     val lineCount = rendered.split("\n", -1).length
-    assert(lineCount >= 5, s"expected at least 5 lines but got $lineCount")
+    assert(lineCount >= 4, s"expected at least 4 lines but got $lineCount")
   }
 }

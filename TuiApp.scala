@@ -381,9 +381,9 @@ class TuiApp(debug: Debug, processActions: ProcessActions, terminalSize: Termina
     val projectMaxWidth = math.max(7, availWidth - nonProjectContentW - tableOverhead)
     val tableWidth = nonProjectContentW + projectMaxWidth + tableOverhead
     val titleAvail = math.max(1, tableWidth - brandW)
-    val titleRealLen = realLength(titleText)
-    val displayTitle = if (titleRealLen > titleAvail) titleText.take(titleAvail - 1) + "\u2026"
-    else titleText + (" " * (titleAvail - titleRealLen))
+    val titleDisplayLen = titleText.length
+    val displayTitle = if (titleDisplayLen > titleAvail) titleText.take(titleAvail - 1) + "\u2026"
+    else titleText + (" " * (titleAvail - titleDisplayLen))
 
     val titleRow = rowTight(
       (displayTitle: Element).color(Color.Cyan).style(Style.Bold),
@@ -445,9 +445,9 @@ class TuiApp(debug: Debug, processActions: ProcessActions, terminalSize: Termina
     } else {
       val emptyTitleText = s" SCALA MONITOR \u2500\u2500 0 $processWord \u2500\u2500 0 kB "
       val emptyAvail = math.max(1, availWidth - brandW)
-      val emptyTitleRealLen = realLength(emptyTitleText)
-      val emptyDisplayTitle = if (emptyTitleRealLen > emptyAvail) emptyTitleText.take(emptyAvail - 1) + "\u2026"
-      else emptyTitleText + (" " * (emptyAvail - emptyTitleRealLen))
+      val emptyTitleDisplayLen = emptyTitleText.length
+      val emptyDisplayTitle = if (emptyTitleDisplayLen > emptyAvail) emptyTitleText.take(emptyAvail - 1) + "\u2026"
+      else emptyTitleText + (" " * (emptyAvail - emptyTitleDisplayLen))
       val emptyTitleRow = rowTight(
         (emptyDisplayTitle: Element).color(Color.Cyan).style(Style.Bold),
         (brandText: Element).color(Color.BrightBlack)
@@ -526,7 +526,7 @@ class TuiApp(debug: Debug, processActions: ProcessActions, terminalSize: Termina
     val helpBox = box("")(helpContent).border(Border.Round)
 
     val mainView = if (state.showHelp) {
-      layout(helpBox, footer)
+      layout(titleRow, helpBox, footer)
     } else if (confirmationOverlay.isDefined) {
       layout(tableElement, confirmationOverlay.get, footer)
     } else {
@@ -539,7 +539,7 @@ class TuiApp(debug: Debug, processActions: ProcessActions, terminalSize: Termina
     {
       val rendered = mainView.render
       val lineCount = rendered.split("\n", -1).length
-      val paddingNeeded = math.max(0, state.termHeight - lineCount)
+      val paddingNeeded = math.max(0, state.termHeight - 1 - lineCount)
       val padding = "\n" * paddingNeeded
       Text(rendered + padding)
     }
