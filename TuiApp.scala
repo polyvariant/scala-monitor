@@ -33,7 +33,9 @@ case class TuiState(
   tickFrame: Int,
   showHelp: Boolean = false,
   termWidth: Int = 80,
-  termHeight: Int = 24
+  termHeight: Int = 24,
+  versionStatus: Version.VersionStatus = Version.VersionCheckPending,
+  lastVersionCheckTime: Long = 0L
 )
 
 sealed trait TuiMsg
@@ -59,6 +61,8 @@ case object Quit extends TuiMsg
 case object ToggleHelp extends TuiMsg
 case object JumpToFirst extends TuiMsg
 case object JumpToLast extends TuiMsg
+case object CheckVersion extends TuiMsg
+case class VersionChecked(status: Version.VersionStatus) extends TuiMsg
 
 enum SortDirection {
   case Ascending
@@ -305,6 +309,24 @@ class TuiApp(debug: Debug, processActions: ProcessActions, terminalSize: Termina
       val maxIdx = math.max(0, state.processes.size - 1)
       state.copy(selectedIndex = maxIdx)
 
+    case CheckVersion =>
+      val now = System.currentTimeMillis()
+      val shouldCheck = state.versionStatus match {
+        case Version.VersionCheckPending => state.lastVersionCheckTime == 0L
+        case _ => (now - state.lastVersionCheckTime) >= 600_000L
+      }
+      if (shouldCheck) {
+        (state.copy(versionStatus = Version.VersionCheckPending, lastVersionCheckTime = now), Cmd.task(Version.checkForUpdate()) {
+          case Right(status) => VersionChecked(status)
+          case Left(_)       => VersionChecked(Version.VersionCheckFailed)
+        })
+      } else {
+        (state, Cmd.none)
+      }
+
+    case VersionChecked(status) =>
+      state.copy(versionStatus = status)
+
     case Quit =>
       (state, Cmd.exit)
   }
@@ -314,6 +336,7 @@ class TuiApp(debug: Debug, processActions: ProcessActions, terminalSize: Termina
     Sub.batch(
       Sub.time.everyMs(1000L, RefreshProcesses),
       Sub.time.everyMs(100L, TickFrame),
+      Sub.time.everyMs(5_000L, CheckVersion),
       Sub.onKeyPress { key =>
         if(confirming) key match {
           case Key.Enter if confirming     =>
@@ -380,15 +403,40 @@ class TuiApp(debug: Debug, processActions: ProcessActions, terminalSize: Termina
     val availWidth = state.termWidth - 1 // reserve 1 column
     val projectMaxWidth = math.max(7, availWidth - nonProjectContentW - tableOverhead)
     val tableWidth = nonProjectContentW + projectMaxWidth + tableOverhead
-    val titleAvail = math.max(1, tableWidth - brandW)
+    val versionText = state.versionStatus match {
+      case Version.UpToDate =>
+        Some(s"v${Version.displayVersion(Version.current)}  ")
+      case Version.UpdateAvailable(_) =>
+        Some(s"v${Version.displayVersion(Version.current)} (update available)  ")
+      case Version.VersionCheckFailed =>
+        Some(s"v${Version.displayVersion(Version.current)} (version check failed)  ")
+      case _ => None
+    }
+    val versionW = versionText.map(_.length).getOrElse(0)
+    val versionColor: Color = state.versionStatus match {
+      case Version.UpToDate          => Color.True(60, 140, 60)
+      case Version.UpdateAvailable(_) => Color.True(180, 110, 40)
+      case Version.VersionCheckFailed => Color.BrightBlack
+      case _                         => Color.BrightBlack
+    }
+    val titleAvail = math.max(1, tableWidth - versionW - brandW)
     val titleDisplayLen = titleText.length
     val displayTitle = if (titleDisplayLen > titleAvail) titleText.take(titleAvail - 1) + "\u2026"
     else titleText + (" " * (titleAvail - titleDisplayLen))
 
-    val titleRow = rowTight(
-      (displayTitle: Element).color(Color.Cyan).style(Style.Bold),
-      (brandText: Element).color(Color.BrightBlack)
-    )
+    val titleRow = versionText match {
+      case Some(vt) =>
+        rowTight(
+          (displayTitle: Element).color(Color.Cyan).style(Style.Bold),
+          (vt: Element).color(versionColor),
+          (brandText: Element).color(Color.BrightBlack)
+        )
+      case None =>
+        rowTight(
+          (displayTitle: Element).color(Color.Cyan).style(Style.Bold),
+          (brandText: Element).color(Color.BrightBlack)
+        )
+    }
 
     def padRight(s: String, w: Int): String =
       if (realLength(s) >= w) s else s + (" " * (w - realLength(s)))
@@ -444,14 +492,23 @@ class TuiApp(debug: Debug, processActions: ProcessActions, terminalSize: Termina
       layout(titleRow, table(tableHeadersE, tableRowsE).border(Border.Round))
     } else {
       val emptyTitleText = s" SCALA MONITOR \u2500\u2500 0 $processWord \u2500\u2500 0 kB "
-      val emptyAvail = math.max(1, availWidth - brandW)
+      val emptyAvail = math.max(1, availWidth - brandW - versionW)
       val emptyTitleDisplayLen = emptyTitleText.length
       val emptyDisplayTitle = if (emptyTitleDisplayLen > emptyAvail) emptyTitleText.take(emptyAvail - 1) + "\u2026"
       else emptyTitleText + (" " * (emptyAvail - emptyTitleDisplayLen))
-      val emptyTitleRow = rowTight(
-        (emptyDisplayTitle: Element).color(Color.Cyan).style(Style.Bold),
-        (brandText: Element).color(Color.BrightBlack)
-      )
+      val emptyTitleRow = versionText match {
+        case Some(vt) =>
+          rowTight(
+            (emptyDisplayTitle: Element).color(Color.Cyan).style(Style.Bold),
+            (vt: Element).color(versionColor),
+            (brandText: Element).color(Color.BrightBlack)
+          )
+        case None =>
+          rowTight(
+            (emptyDisplayTitle: Element).color(Color.Cyan).style(Style.Bold),
+            (brandText: Element).color(Color.BrightBlack)
+          )
+      }
       val emptyMsg = layout(
         "  No Scala processes found",
         "  Launch sbt, scala-cli, metals, or bloop to see them here"
