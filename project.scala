@@ -4,6 +4,9 @@
 //> using nativeMode release-full
 //> using nativeLto full
 //> using option -no-indent
+//> using computeVersion git:dynver
+//> using buildInfo
+//> using dep com.softwaremill.sttp.client4::core_native0.5:4.0.23
 //> using dep com.lihaoyi::mainargs_native0.5:0.7.8
 //> using dep xyz.matthieucourt::layoutz_native0.5:0.7.0
 //> using test.dep org.scalameta::munit_native0.5:1.3.0
