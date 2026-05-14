@@ -312,11 +312,11 @@ class TuiApp(debug: Debug, processActions: ProcessActions, terminalSize: Termina
     case CheckVersion =>
       val now = System.currentTimeMillis()
       val shouldCheck = state.versionStatus match {
-        case Version.VersionCheckPending => true
+        case Version.VersionCheckPending => state.lastVersionCheckTime == 0L
         case _ => (now - state.lastVersionCheckTime) >= 600_000L
       }
       if (shouldCheck) {
-        (state.copy(lastVersionCheckTime = now), Cmd.task(Version.checkForUpdate()) {
+        (state.copy(versionStatus = Version.VersionCheckPending, lastVersionCheckTime = now), Cmd.task(Version.checkForUpdate()) {
           case Right(status) => VersionChecked(status)
           case Left(_)       => VersionChecked(Version.VersionCheckFailed)
         })
@@ -408,9 +408,17 @@ class TuiApp(debug: Debug, processActions: ProcessActions, terminalSize: Termina
         Some(s"v${Version.displayVersion(Version.current)}  ")
       case Version.UpdateAvailable(_) =>
         Some(s"v${Version.displayVersion(Version.current)} (update available)  ")
+      case Version.VersionCheckFailed =>
+        Some(s"v${Version.displayVersion(Version.current)} (version check failed)  ")
       case _ => None
     }
     val versionW = versionText.map(_.length).getOrElse(0)
+    val versionColor: Color = state.versionStatus match {
+      case Version.UpToDate          => Color.True(60, 140, 60)
+      case Version.UpdateAvailable(_) => Color.True(180, 110, 40)
+      case Version.VersionCheckFailed => Color.BrightBlack
+      case _                         => Color.BrightBlack
+    }
     val titleAvail = math.max(1, tableWidth - versionW - brandW)
     val titleDisplayLen = titleText.length
     val displayTitle = if (titleDisplayLen > titleAvail) titleText.take(titleAvail - 1) + "\u2026"
@@ -420,11 +428,7 @@ class TuiApp(debug: Debug, processActions: ProcessActions, terminalSize: Termina
       case Some(vt) =>
         rowTight(
           (displayTitle: Element).color(Color.Cyan).style(Style.Bold),
-          (vt: Element).color(state.versionStatus match {
-            case Version.UpToDate          => Color.True(60, 140, 60)
-            case Version.UpdateAvailable(_) => Color.True(180, 110, 40)
-            case _                         => Color.BrightBlack
-          }),
+          (vt: Element).color(versionColor),
           (brandText: Element).color(Color.BrightBlack)
         )
       case None =>
@@ -496,11 +500,7 @@ class TuiApp(debug: Debug, processActions: ProcessActions, terminalSize: Termina
         case Some(vt) =>
           rowTight(
             (emptyDisplayTitle: Element).color(Color.Cyan).style(Style.Bold),
-            (vt: Element).color(state.versionStatus match {
-              case Version.UpToDate          => Color.True(60, 140, 60)
-              case Version.UpdateAvailable(_) => Color.True(180, 110, 40)
-              case _                         => Color.BrightBlack
-            }),
+            (vt: Element).color(versionColor),
             (brandText: Element).color(Color.BrightBlack)
           )
         case None =>

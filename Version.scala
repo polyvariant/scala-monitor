@@ -4,6 +4,7 @@ import scala.cli.build.BuildInfo
 import sttp.client4.*
 import sttp.client4.curl.CurlBackend
 import scala.util.Try
+import scala.concurrent.duration._
 
 object Version {
 
@@ -54,6 +55,7 @@ object Version {
         val response = basicRequest
           .get(uri"https://github.com/polyvariant/scala-monitor/releases/latest")
           .followRedirects(false)
+          .readTimeout(5.seconds)
           .send(backend)
 
         if (response.code.isRedirect) {
@@ -80,7 +82,7 @@ object Version {
     (parseSemver(cleanCurrent), fetchLatestReleaseVersion().flatMap(parseSemver)) match {
       case (Some(cur), Some(latest)) =>
         if (compareSemver(cur, latest) >= 0) UpToDate
-        else UpdateAvailable(s"$latest")
+        else UpdateAvailable(s"${latest._1}.${latest._2}.${latest._3}")
       case _ => VersionCheckFailed
     }
   }
